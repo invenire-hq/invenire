@@ -1,0 +1,389 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:invenire:schema:snapshot:v1",
+  "$ref": "#/$defs/Snapshot",
+  "$defs": {
+    "BrowserExtension": {
+      "properties": {
+        "browser": {
+          "type": "string",
+          "enum": [
+            "chrome",
+            "edge",
+            "firefox"
+          ]
+        },
+        "profile": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "browser",
+        "id"
+      ]
+    },
+    "CollectorError": {
+      "properties": {
+        "collector": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "collector",
+        "error"
+      ]
+    },
+    "Disk": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "serial": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ]
+    },
+    "Hardware": {
+      "properties": {
+        "cpu_model": {
+          "type": "string"
+        },
+        "cpu_cores": {
+          "type": "integer"
+        },
+        "memory_bytes": {
+          "type": "integer"
+        },
+        "disks": {
+          "items": {
+            "$ref": "#/$defs/Disk"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Host": {
+      "properties": {
+        "hostname": {
+          "type": "string"
+        },
+        "smbios_uuid": {
+          "type": "string"
+        },
+        "machine_id": {
+          "type": "string",
+          "description": "MachineGuid no Windows"
+        },
+        "serial": {
+          "type": "string"
+        },
+        "manufacturer": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "hostname"
+      ]
+    },
+    "Interface": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "mac": {
+          "type": "string"
+        },
+        "addrs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Endereços em notação CIDR"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ]
+    },
+    "Listener": {
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "address": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "process": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "protocol",
+        "address",
+        "port"
+      ]
+    },
+    "Network": {
+      "properties": {
+        "interfaces": {
+          "items": {
+            "$ref": "#/$defs/Interface"
+          },
+          "type": "array"
+        },
+        "listeners": {
+          "items": {
+            "$ref": "#/$defs/Listener"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "interfaces",
+        "listeners"
+      ]
+    },
+    "OS": {
+      "properties": {
+        "family": {
+          "type": "string",
+          "enum": [
+            "windows",
+            "linux",
+            "other"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "build": {
+          "type": "string"
+        },
+        "kernel": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "family",
+        "name"
+      ]
+    },
+    "Snapshot": {
+      "properties": {
+        "schema_version": {
+          "type": "string"
+        },
+        "agent_id": {
+          "type": "string",
+          "description": "Vazio no modo offline"
+        },
+        "agent_version": {
+          "type": "string"
+        },
+        "collected_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "prev_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "host": {
+          "$ref": "#/$defs/Host"
+        },
+        "os": {
+          "$ref": "#/$defs/OS"
+        },
+        "hardware": {
+          "$ref": "#/$defs/Hardware"
+        },
+        "software": {
+          "items": {
+            "$ref": "#/$defs/Software"
+          },
+          "type": "array"
+        },
+        "browser_extensions": {
+          "items": {
+            "$ref": "#/$defs/BrowserExtension"
+          },
+          "type": "array"
+        },
+        "users": {
+          "items": {
+            "$ref": "#/$defs/User"
+          },
+          "type": "array"
+        },
+        "network": {
+          "$ref": "#/$defs/Network"
+        },
+        "collector_errors": {
+          "items": {
+            "$ref": "#/$defs/CollectorError"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "schema_version",
+        "agent_version",
+        "collected_at",
+        "host",
+        "os",
+        "hardware",
+        "software",
+        "browser_extensions",
+        "users",
+        "network"
+      ]
+    },
+    "Software": {
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "win_registry",
+            "dpkg",
+            "rpm"
+          ]
+        },
+        "package_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "publisher": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "install_path": {
+          "type": "string"
+        },
+        "install_date": {
+          "type": "string",
+          "description": "Como a fonte reporta (YYYYMMDD no registro"
+        },
+        "user_sid": {
+          "type": "string"
+        },
+        "system_component": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "source",
+        "name"
+      ]
+    },
+    "User": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "sid": {
+          "type": "string"
+        },
+        "uid": {
+          "type": "string"
+        },
+        "admin": {
+          "type": "boolean"
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "last_logon": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ]
+    }
+  },
+  "title": "Invenire snapshot v1"
+}
