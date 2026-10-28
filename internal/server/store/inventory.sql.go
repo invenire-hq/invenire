@@ -48,20 +48,47 @@ func (q *Queries) ClaimUnprocessedSnapshots(ctx context.Context, limit int32) ([
 	return items, nil
 }
 
+const consumeEnrollmentToken = `-- name: ConsumeEnrollmentToken :one
+SELECT id, tenant_id FROM enrollment_token
+WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
+FOR UPDATE
+`
+
+type ConsumeEnrollmentTokenRow struct {
+	ID       uuid.UUID
+	TenantID uuid.UUID
+}
+
+// Reserva o token na transação do enrollment. FOR UPDATE impede que dois
+// cadastros simultâneos usem o mesmo token; MarkEnrollmentTokenUsed fecha.
+func (q *Queries) ConsumeEnrollmentToken(ctx context.Context, tokenHash []byte) (ConsumeEnrollmentTokenRow, error) {
+	row := q.db.QueryRow(ctx, consumeEnrollmentToken, tokenHash)
+	var i ConsumeEnrollmentTokenRow
+	err := row.Scan(&i.ID, &i.TenantID)
+	return i, err
+}
+
 const createAgent = `-- name: CreateAgent :one
-INSERT INTO agent (asset_id, cert_fingerprint, agent_version)
-VALUES ($1, $2, $3)
+INSERT INTO agent (id, asset_id, cert_fingerprint, agent_version)
+VALUES ($1, $2, $3, $4)
 RETURNING id, asset_id, cert_fingerprint, agent_version, enrolled_at, last_seen_at, revoked_at
 `
 
 type CreateAgentParams struct {
+	ID              uuid.UUID
 	AssetID         uuid.UUID
 	CertFingerprint string
 	AgentVersion    string
 }
 
+// O id vem de quem chama: ele vai no certificado antes da linha existir.
 func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error) {
-	row := q.db.QueryRow(ctx, createAgent, arg.AssetID, arg.CertFingerprint, arg.AgentVersion)
+	row := q.db.QueryRow(ctx, createAgent,
+		arg.ID,
+		arg.AssetID,
+		arg.CertFingerprint,
+		arg.AgentVersion,
+	)
 	var i Agent
 	err := row.Scan(
 		&i.ID,
@@ -72,6 +99,38 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.LastSeenAt,
 		&i.RevokedAt,
 	)
+	return i, err
+}
+
+const createEnrollmentToken = `-- name: CreateEnrollmentToken :one
+INSERT INTO enrollment_token (tenant_id, token_hash, description, created_by, expires_at)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, expires_at
+`
+
+type CreateEnrollmentTokenParams struct {
+	TenantID    uuid.UUID
+	TokenHash   []byte
+	Description string
+	CreatedBy   *uuid.UUID
+	ExpiresAt   time.Time
+}
+
+type CreateEnrollmentTokenRow struct {
+	ID        uuid.UUID
+	ExpiresAt time.Time
+}
+
+func (q *Queries) CreateEnrollmentToken(ctx context.Context, arg CreateEnrollmentTokenParams) (CreateEnrollmentTokenRow, error) {
+	row := q.db.QueryRow(ctx, createEnrollmentToken,
+		arg.TenantID,
+		arg.TokenHash,
+		arg.Description,
+		arg.CreatedBy,
+		arg.ExpiresAt,
+	)
+	var i CreateEnrollmentTokenRow
+	err := row.Scan(&i.ID, &i.ExpiresAt)
 	return i, err
 }
 
@@ -196,6 +255,20 @@ func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) 
 	var i InsertSnapshotRow
 	err := row.Scan(&i.ID, &i.Inserted)
 	return i, err
+}
+
+const markEnrollmentTokenUsed = `-- name: MarkEnrollmentTokenUsed :exec
+UPDATE enrollment_token SET used_at = now(), used_by = $2 WHERE id = $1
+`
+
+type MarkEnrollmentTokenUsedParams struct {
+	ID     uuid.UUID
+	UsedBy *uuid.UUID
+}
+
+func (q *Queries) MarkEnrollmentTokenUsed(ctx context.Context, arg MarkEnrollmentTokenUsedParams) error {
+	_, err := q.db.Exec(ctx, markEnrollmentTokenUsed, arg.ID, arg.UsedBy)
+	return err
 }
 
 const markSnapshotProcessed = `-- name: MarkSnapshotProcessed :exec

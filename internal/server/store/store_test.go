@@ -3,10 +3,8 @@ package store_test
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/json"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -14,64 +12,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 
 	"github.com/athosbes/invenire/internal/server/store"
-	"github.com/athosbes/invenire/migrations"
+	"github.com/athosbes/invenire/internal/testdb"
 )
 
-// Os testes rodam contra um PostgreSQL de verdade, num schema próprio que é
-// apagado no fim. Sem INVENIRE_TEST_DATABASE_URL eles são pulados.
 func setup(t *testing.T) (*store.Queries, *pgxpool.Pool) {
-	t.Helper()
-	url := os.Getenv("INVENIRE_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("INVENIRE_TEST_DATABASE_URL não definida")
-	}
-	ctx := context.Background()
-
-	schema := "test_" + uuid.NewString()[:8]
-	admin, err := pgx.Connect(ctx, url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
-		admin.Close(context.Background())
-	})
-
-	cfg, err := pgxpool.ParseConfig(url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.ConnConfig.RuntimeParams["search_path"] = schema
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-
-	// goose usa database/sql; a conexão aponta para o mesmo schema.
-	db, err := sql.Open("pgx", cfg.ConnString()+"&search_path="+schema)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	goose.SetBaseFS(migrations.FS)
-	goose.SetLogger(goose.NopLogger())
-	if err := goose.SetDialect("postgres"); err != nil {
-		t.Fatal(err)
-	}
-	// Sobe, desce e sobe de novo: o Down também precisa funcionar.
-	for _, step := range []func(*sql.DB, string, ...goose.OptionsFunc) error{goose.Up, goose.Reset, goose.Up} {
-		if err := step(db, "."); err != nil {
-			t.Fatal(err)
-		}
-	}
+	pool := testdb.New(t)
 	return store.New(pool), pool
 }
 
@@ -102,7 +49,7 @@ func TestInventoryFlow(t *testing.T) {
 		t.Fatalf("segundo upsert devia atualizar o mesmo ativo: %+v %v", a2, err)
 	}
 
-	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{AssetID: a1.ID, CertFingerprint: "cert1", AgentVersion: "0.1.0"})
+	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{ID: uuid.New(), AssetID: a1.ID, CertFingerprint: "cert1", AgentVersion: "0.1.0"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,3 +2,4 @@
 *.exe
 snapshot*.json
 !pkg/snapshot/schema/*.json
+/data/

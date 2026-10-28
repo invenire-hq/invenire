@@ -58,6 +58,18 @@ type ChangeLog struct {
 	Data       json.RawMessage
 }
 
+type EnrollmentToken struct {
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	TokenHash   []byte
+	Description string
+	CreatedBy   *uuid.UUID
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	UsedAt      *time.Time
+	UsedBy      *uuid.UUID
+}
+
 type Installation struct {
 	ID                uuid.UUID
 	AssetID           uuid.UUID

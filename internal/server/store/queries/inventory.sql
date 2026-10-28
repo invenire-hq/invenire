@@ -27,13 +27,29 @@ RETURNING *, (xmax = 0)::boolean AS inserted;
 SELECT * FROM asset WHERE id = $1;
 
 -- name: CreateAgent :one
-INSERT INTO agent (asset_id, cert_fingerprint, agent_version)
-VALUES ($1, $2, $3)
+-- O id vem de quem chama: ele vai no certificado antes da linha existir.
+INSERT INTO agent (id, asset_id, cert_fingerprint, agent_version)
+VALUES ($1, $2, $3, $4)
 RETURNING *;
 
 -- name: GetActiveAgentByCert :one
 -- Usado na autenticação mTLS: agente revogado não é encontrado.
 SELECT * FROM agent WHERE cert_fingerprint = $1 AND revoked_at IS NULL;
+
+-- name: CreateEnrollmentToken :one
+INSERT INTO enrollment_token (tenant_id, token_hash, description, created_by, expires_at)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, expires_at;
+
+-- name: ConsumeEnrollmentToken :one
+-- Reserva o token na transação do enrollment. FOR UPDATE impede que dois
+-- cadastros simultâneos usem o mesmo token; MarkEnrollmentTokenUsed fecha.
+SELECT id, tenant_id FROM enrollment_token
+WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
+FOR UPDATE;
+
+-- name: MarkEnrollmentTokenUsed :exec
+UPDATE enrollment_token SET used_at = now(), used_by = $2 WHERE id = $1;
 
 -- name: TouchAgent :exec
 UPDATE agent SET last_seen_at = now(), agent_version = $2 WHERE id = $1;
