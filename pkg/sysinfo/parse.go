@@ -1,4 +1,4 @@
-package collect
+package sysinfo
 
 import (
 	"bufio"
@@ -6,13 +6,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/turetos/invenire/pkg/snapshot"
 )
 
-// Parsers dos formatos Linux, separados para poderem ser testados em qualquer SO.
+// Parsers dos formatos Linux. Ficam fora dos arquivos por plataforma para
+// poderem ser usados e testados em qualquer SO (por exemplo, sobre arquivos
+// copiados de uma imagem de disco).
 
-func parseOSRelease(r io.Reader) map[string]string {
+// ParseOSRelease lê um arquivo no formato os-release(5).
+func ParseOSRelease(r io.Reader) map[string]string {
 	m := map[string]string{}
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
@@ -30,19 +31,21 @@ func parseOSRelease(r io.Reader) map[string]string {
 	return m
 }
 
-// parseDpkgStatus lê o banco do dpkg direto, sem chamar dpkg-query.
-func parseDpkgStatus(r io.Reader) ([]snapshot.Software, error) {
-	var out []snapshot.Software
+// ParseDpkgStatus lê o banco do dpkg (/var/lib/dpkg/status) e devolve os
+// pacotes instalados. location vai para Package.Location.
+func ParseDpkgStatus(r io.Reader, location string) ([]Package, error) {
+	var out []Package
 	fields := map[string]string{}
 	flush := func() {
 		if strings.HasSuffix(fields["Status"], " installed") && fields["Package"] != "" {
-			out = append(out, snapshot.Software{
-				Source:    snapshot.SourceDpkg,
-				PackageID: fields["Package"],
+			out = append(out, Package{
+				Source:    SourceDpkg,
+				ID:        fields["Package"],
 				Name:      fields["Package"],
 				Publisher: fields["Maintainer"],
 				Version:   fields["Version"],
 				Arch:      fields["Architecture"],
+				Location:  location,
 			})
 		}
 		clear(fields)
@@ -67,8 +70,12 @@ func parseDpkgStatus(r io.Reader) ([]snapshot.Software, error) {
 	return out, sc.Err()
 }
 
-func parseRpmOutput(b []byte) []snapshot.Software {
-	var out []snapshot.Software
+// RpmQueryFormat é o --queryformat que ParseRpmQuery espera.
+const RpmQueryFormat = `%{NAME}\t%{EPOCH}\t%{VERSION}-%{RELEASE}\t%{ARCH}\t%{VENDOR}\t%{INSTALLTIME}\n`
+
+// ParseRpmQuery lê a saída de `rpm -qa --qf RpmQueryFormat`.
+func ParseRpmQuery(b []byte, location string) []Package {
+	var out []Package
 	for _, line := range strings.Split(string(b), "\n") {
 		f := strings.Split(line, "\t")
 		if len(f) != 6 || f[0] == "gpg-pubkey" {
@@ -78,20 +85,21 @@ func parseRpmOutput(b []byte) []snapshot.Software {
 		if f[1] != "(none)" && f[1] != "" {
 			version = f[1] + ":" + version
 		}
-		sw := snapshot.Software{
-			Source:    snapshot.SourceRpm,
-			PackageID: f[0],
-			Name:      f[0],
-			Version:   version,
-			Arch:      f[3],
+		p := Package{
+			Source:   SourceRpm,
+			ID:       f[0],
+			Name:     f[0],
+			Version:  version,
+			Arch:     f[3],
+			Location: location,
 		}
 		if f[4] != "(none)" {
-			sw.Publisher = f[4]
+			p.Publisher = f[4]
 		}
 		if sec, err := strconv.ParseInt(f[5], 10, 64); err == nil {
-			sw.InstallDate = time.Unix(sec, 0).UTC().Format(time.RFC3339)
+			p.InstallDate = time.Unix(sec, 0).UTC().Format(time.RFC3339)
 		}
-		out = append(out, sw)
+		out = append(out, p)
 	}
 	return out
 }

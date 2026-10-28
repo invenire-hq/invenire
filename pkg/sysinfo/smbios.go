@@ -1,4 +1,4 @@
-package collect
+package sysinfo
 
 import (
 	"encoding/binary"
@@ -7,22 +7,14 @@ import (
 	"strings"
 )
 
-// systemInfo é o que interessa da estrutura SMBIOS tipo 1 (System Information).
-type systemInfo struct {
-	Manufacturer string
-	Product      string
-	Serial       string
-	UUID         string
-}
-
-// parseSMBIOSSystem percorre a tabela SMBIOS bruta e extrai a estrutura tipo 1.
-// major/minor são a versão do SMBIOS: a partir da 2.6 os três primeiros campos
-// do UUID vêm em little-endian.
-func parseSMBIOSSystem(table []byte, major, minor byte) (systemInfo, error) {
+// ParseSMBIOSSystem percorre uma tabela SMBIOS bruta e extrai a estrutura
+// tipo 1 (System Information). major/minor são a versão do SMBIOS: a partir
+// da 2.6 os três primeiros campos do UUID vêm em little-endian.
+func ParseSMBIOSSystem(table []byte, major, minor byte) (System, error) {
 	for off := 0; off+4 <= len(table); {
 		typ, length := table[off], int(table[off+1])
 		if length < 4 || off+length > len(table) {
-			return systemInfo{}, errors.New("smbios: estrutura truncada")
+			return System{}, errors.New("smbios: estrutura truncada")
 		}
 		formatted := table[off : off+length]
 
@@ -32,7 +24,7 @@ func parseSMBIOSSystem(table []byte, major, minor byte) (systemInfo, error) {
 			end++
 		}
 		if end+1 >= len(table) {
-			return systemInfo{}, errors.New("smbios: área de strings sem terminador")
+			return System{}, errors.New("smbios: área de strings sem terminador")
 		}
 		strs := strings.Split(string(table[off+length:end]), "\x00")
 		str := func(i int) string {
@@ -44,17 +36,17 @@ func parseSMBIOSSystem(table []byte, major, minor byte) (systemInfo, error) {
 
 		switch typ {
 		case 1:
-			si := systemInfo{Manufacturer: str(4), Product: str(5), Serial: str(7)}
+			s := System{Manufacturer: str(4), Product: str(5), Version: str(6), Serial: str(7)}
 			if len(formatted) >= 0x18 {
-				si.UUID = formatUUID(formatted[8:24], major > 2 || major == 2 && minor >= 6)
+				s.UUID = formatUUID(formatted[8:24], major > 2 || major == 2 && minor >= 6)
 			}
-			return si, nil
+			return s, nil
 		case 127: // fim da tabela
-			return systemInfo{}, errors.New("smbios: estrutura tipo 1 ausente")
+			return System{}, errors.New("smbios: estrutura tipo 1 ausente")
 		}
 		off = end + 2
 	}
-	return systemInfo{}, errors.New("smbios: estrutura tipo 1 ausente")
+	return System{}, errors.New("smbios: estrutura tipo 1 ausente")
 }
 
 func formatUUID(b []byte, littleEndian bool) string {

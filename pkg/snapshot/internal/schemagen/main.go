@@ -10,7 +10,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 
-	"github.com/turetos/invenire/pkg/snapshot"
+	"github.com/athosbes/invenire/pkg/snapshot"
 )
 
 func generate() ([]byte, error) {

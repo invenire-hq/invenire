@@ -12,8 +12,8 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/turetos/invenire/internal/agent/collect"
-	"github.com/turetos/invenire/pkg/snapshot"
+	"github.com/athosbes/invenire/internal/agent/collect"
+	"github.com/athosbes/invenire/pkg/snapshot"
 )
 
 // version é preenchida no build: -ldflags "-X main.version=0.1.0".

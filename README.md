@@ -7,7 +7,7 @@ A arquitetura e o modelo de dados estão no documento
 ## Estado (v0)
 
 - [x] `pkg/snapshot` v1: structs Go, hash SHA-256 e JSON Schema gerado (`schema/v1.json`)
-- [x] Coletores de host, SO e software: Windows (SMBIOS via `GetSystemFirmwareTable`, registro) e Linux (DMI, os-release, dpkg, rpm)
+- [x] `pkg/sysinfo`: leitura de baixo nível de host, SO e software — Windows (SMBIOS via `GetSystemFirmwareTable`, registro) e Linux (DMI, os-release, dpkg, rpm). Só depende de `golang.org/x/sys` e não conhece o formato do snapshot, para poder virar o módulo compartilhado com o [PeritiaGo](https://github.com/athosbes/PeritiaGo)
 - [x] `invenire-agent collect --out` offline
 - [ ] Migrações v0 e consultas sqlc
 - [ ] `POST /v1/enroll` e `POST /v1/snapshots` com mTLS

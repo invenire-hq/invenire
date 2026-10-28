@@ -1,4 +1,4 @@
-package collect
+package sysinfo
 
 import (
 	"strings"
@@ -15,31 +15,31 @@ func TestParseSMBIOSSystem(t *testing.T) {
 	end := []byte{127, 4, 0, 0, 0, 0}
 	table := append(append(bios, sys...), end...)
 
-	si, err := parseSMBIOSSystem(table, 3, 4)
+	si, err := ParseSMBIOSSystem(table, 3, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := systemInfo{"Dell Inc.", "OptiPlex 7090", "ABC1234", "4C4C4544-0042-3510-8052-B4C04F4D4E32"}
+	want := System{Manufacturer: "Dell Inc.", Product: "OptiPlex 7090", Version: "1.0", Serial: "ABC1234", UUID: "4C4C4544-0042-3510-8052-B4C04F4D4E32"}
 	if si != want {
 		t.Errorf("got %+v, want %+v", si, want)
 	}
 
 	// SMBIOS antigo (< 2.6): UUID inteiro em big-endian.
-	si, _ = parseSMBIOSSystem(table, 2, 4)
+	si, _ = ParseSMBIOSSystem(table, 2, 4)
 	if si.UUID != "44454C4C-4200-1035-8052-B4C04F4D4E32" {
 		t.Errorf("uuid big-endian: %s", si.UUID)
 	}
 
-	if _, err := parseSMBIOSSystem(append(bios, end...), 3, 4); err == nil {
+	if _, err := ParseSMBIOSSystem(append(bios, end...), 3, 4); err == nil {
 		t.Error("tabela sem tipo 1 deveria falhar")
 	}
-	if _, err := parseSMBIOSSystem(table[:20], 3, 4); err == nil {
+	if _, err := ParseSMBIOSSystem(table[:20], 3, 4); err == nil {
 		t.Error("tabela truncada deveria falhar")
 	}
 }
 
 func TestParseOSRelease(t *testing.T) {
-	m := parseOSRelease(strings.NewReader(`# comentário
+	m := ParseOSRelease(strings.NewReader(`# comentário
 NAME="Debian GNU/Linux"
 VERSION_ID="12"
 ID=debian
@@ -51,7 +51,7 @@ PRETTY_NAME='Debian 12'
 }
 
 func TestParseDpkgStatus(t *testing.T) {
-	list, err := parseDpkgStatus(strings.NewReader(`Package: openssl
+	list, err := ParseDpkgStatus(strings.NewReader(`Package: openssl
 Status: install ok installed
 Architecture: amd64
 Maintainer: Debian OpenSSL Team <pkg-openssl-devel@alioth-lists.debian.net>
@@ -66,14 +66,14 @@ Version: 1.0
 Package: curl
 Status: install ok installed
 Version: 7.88.1-10
-Architecture: amd64`))
+Architecture: amd64`), "status")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(list) != 2 {
 		t.Fatalf("esperava 2 pacotes, veio %d: %+v", len(list), list)
 	}
-	if o := list[0]; o.Name != "openssl" || o.Version != "3.0.11-1~deb12u2" || o.Arch != "amd64" || o.Source != "dpkg" {
+	if o := list[0]; o.Name != "openssl" || o.Version != "3.0.11-1~deb12u2" || o.Arch != "amd64" || o.Source != "dpkg" || o.Location != "status" {
 		t.Errorf("%+v", o)
 	}
 	if list[1].Name != "curl" {
@@ -81,10 +81,10 @@ Architecture: amd64`))
 	}
 }
 
-func TestParseRpmOutput(t *testing.T) {
-	list := parseRpmOutput([]byte("bash\t(none)\t5.1.8-9.el9\tx86_64\tRed Hat, Inc.\t1700000000\n" +
-		"gpg-pubkey\t(none)\tfd431d51-4ae0493b\t(none)\t(none)\t1700000000\n" +
-		"openssl\t1\t3.0.7-27.el9\tx86_64\t(none)\t1700000000\n"))
+func TestParseRpmQuery(t *testing.T) {
+	list := ParseRpmQuery([]byte("bash\t(none)\t5.1.8-9.el9\tx86_64\tRed Hat, Inc.\t1700000000\n"+
+		"gpg-pubkey\t(none)\tfd431d51-4ae0493b\t(none)\t(none)\t1700000000\n"+
+		"openssl\t1\t3.0.7-27.el9\tx86_64\t(none)\t1700000000\n"), "rpm -qa")
 	if len(list) != 2 {
 		t.Fatalf("esperava 2 pacotes: %+v", list)
 	}

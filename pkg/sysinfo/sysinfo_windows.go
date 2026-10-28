@@ -1,4 +1,4 @@
-package collect
+package sysinfo
 
 import (
 	"context"
@@ -10,8 +10,6 @@ import (
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
-
-	"github.com/turetos/invenire/pkg/snapshot"
 )
 
 // Abre sempre a visão de 64 bits do registro, mesmo num binário de 32 bits.
@@ -19,8 +17,8 @@ const view64 = registry.WOW64_64KEY
 
 var procGetSystemFirmwareTable = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetSystemFirmwareTable")
 
-// readSMBIOS lê a tabela SMBIOS bruta pela API do Windows, sem WMI.
-func readSMBIOS() (table []byte, major, minor byte, err error) {
+// ReadSMBIOS lê a tabela SMBIOS bruta pela API do Windows, sem WMI.
+func ReadSMBIOS() (table []byte, major, minor byte, err error) {
 	const rsmb = 'R'<<24 | 'S'<<16 | 'M'<<8 | 'B'
 	n, _, err := procGetSystemFirmwareTable.Call(rsmb, 0, 0, 0)
 	if n == 0 {
@@ -42,37 +40,35 @@ func readSMBIOS() (table []byte, major, minor byte, err error) {
 	return buf[8 : 8+length], buf[1], buf[2], nil
 }
 
-func collectHost(ctx context.Context) (snapshot.Host, error) {
-	var h snapshot.Host
-	var errs []error
-
-	if name, err := windows.ComputerName(); err == nil {
-		h.Hostname = name
-	}
-
-	table, major, minor, err := readSMBIOS()
-	if err == nil {
-		var si systemInfo
-		si, err = parseSMBIOSSystem(table, major, minor)
-		h.SMBIOSUUID, h.Serial, h.Manufacturer, h.Model = si.UUID, si.Serial, si.Manufacturer, si.Product
-	}
+// ReadSystem lê a identificação do hardware da tabela SMBIOS.
+func ReadSystem() (System, error) {
+	table, major, minor, err := ReadSMBIOS()
 	if err != nil {
-		errs = append(errs, err)
+		return System{}, err
 	}
-
-	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Cryptography`, registry.QUERY_VALUE|view64)
-	if err == nil {
-		h.MachineID, _, err = k.GetStringValue("MachineGuid")
-		k.Close()
-	}
-	if err != nil {
-		errs = append(errs, fmt.Errorf("MachineGuid: %w", err))
-	}
-	return h, errors.Join(errs...)
+	return ParseSMBIOSSystem(table, major, minor)
 }
 
-func collectOS(ctx context.Context) (snapshot.OS, error) {
-	o := snapshot.OS{Family: "windows", Arch: windowsArch()}
+// Hostname devolve o nome NetBIOS da máquina, como o Windows o exibe.
+func Hostname() (string, error) { return windows.ComputerName() }
+
+// MachineID lê HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid.
+func MachineID() (string, error) {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Cryptography`, registry.QUERY_VALUE|view64)
+	if err != nil {
+		return "", fmt.Errorf("MachineGuid: %w", err)
+	}
+	defer k.Close()
+	id, _, err := k.GetStringValue("MachineGuid")
+	if err != nil {
+		return "", fmt.Errorf("MachineGuid: %w", err)
+	}
+	return id, nil
+}
+
+// ReadOS lê HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion.
+func ReadOS() (OS, error) {
+	o := OS{Family: "windows", Arch: nativeArch()}
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows NT\CurrentVersion`, registry.QUERY_VALUE|view64)
 	if err != nil {
 		return o, err
@@ -101,7 +97,8 @@ func collectOS(ctx context.Context) (snapshot.OS, error) {
 	return o, nil
 }
 
-func windowsArch() string {
+// nativeArch devolve a arquitetura do Windows, não a do processo.
+func nativeArch() string {
 	var process, native uint16
 	if err := windows.IsWow64Process2(windows.CurrentProcess(), &process, &native); err != nil {
 		return ""
@@ -119,32 +116,34 @@ func windowsArch() string {
 
 const uninstallPath = `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`
 
-func collectSoftware(ctx context.Context) ([]snapshot.Software, error) {
-	var out []snapshot.Software
+// InstalledPackages lê as chaves Uninstall do registro: HKLM nas visões de
+// 64 e 32 bits e HKU de cada hive de usuário carregada.
+func InstalledPackages(ctx context.Context) ([]Package, error) {
+	var out []Package
 	var errs []error
 	seen := map[string]bool{}
 
-	add := func(root registry.Key, path string, access uint32, arch, sid string) {
-		list, err := readUninstall(root, path, access, arch, sid)
+	add := func(root registry.Key, rootName, path string, access uint32, arch, sid string) {
+		list, err := readUninstall(root, rootName, path, access, arch, sid)
 		if err != nil && !errors.Is(err, registry.ErrNotExist) {
-			errs = append(errs, fmt.Errorf("%s: %w", path, err))
+			errs = append(errs, fmt.Errorf(`%s\%s: %w`, rootName, path, err))
 		}
-		for _, sw := range list {
+		for _, p := range list {
 			// Num Windows de 32 bits as duas visões são a mesma chave.
-			key := sw.UserSID + "\x00" + sw.PackageID + "\x00" + sw.Name + "\x00" + sw.Version
+			key := p.UserSID + "\x00" + p.ID + "\x00" + p.Name + "\x00" + p.Version
 			if !seen[key] {
 				seen[key] = true
-				out = append(out, sw)
+				out = append(out, p)
 			}
 		}
 	}
 
 	arch64 := "x64"
-	if windowsArch() == "arm64" {
+	if nativeArch() == "arm64" {
 		arch64 = "arm64"
 	}
-	add(registry.LOCAL_MACHINE, uninstallPath, registry.WOW64_64KEY, arch64, "")
-	add(registry.LOCAL_MACHINE, uninstallPath, registry.WOW64_32KEY, "x86", "")
+	add(registry.LOCAL_MACHINE, "HKLM", uninstallPath, registry.WOW64_64KEY, arch64, "")
+	add(registry.LOCAL_MACHINE, "HKLM", uninstallPath, registry.WOW64_32KEY, "x86", "")
 
 	// Instalações por usuário: só as hives carregadas (usuários com sessão ou
 	// serviços). Carregar o NTUSER.DAT dos demais fica para depois.
@@ -156,12 +155,12 @@ func collectSoftware(ctx context.Context) ([]snapshot.Software, error) {
 		if strings.HasSuffix(sid, "_Classes") || sid == ".DEFAULT" {
 			continue
 		}
-		add(registry.USERS, sid+`\`+uninstallPath, 0, "", sid)
+		add(registry.USERS, "HKU", sid+`\`+uninstallPath, 0, "", sid)
 	}
 	return out, errors.Join(errs...)
 }
 
-func readUninstall(root registry.Key, path string, access uint32, arch, sid string) ([]snapshot.Software, error) {
+func readUninstall(root registry.Key, rootName, path string, access uint32, arch, sid string) ([]Package, error) {
 	k, err := registry.OpenKey(root, path, registry.ENUMERATE_SUB_KEYS|access)
 	if err != nil {
 		return nil, err
@@ -172,16 +171,22 @@ func readUninstall(root registry.Key, path string, access uint32, arch, sid stri
 		return nil, err
 	}
 
-	var out []snapshot.Software
+	// A visão de 32 bits mora em WOW6432Node; o caminho registrado é o real.
+	location := rootName + `\` + path
+	if access == registry.WOW64_32KEY {
+		location = rootName + `\` + strings.Replace(path, `SOFTWARE\`, `SOFTWARE\WOW6432Node\`, 1)
+	}
+
+	var out []Package
 	for _, name := range names {
 		sk, err := registry.OpenKey(k, name, registry.QUERY_VALUE|access)
 		if err != nil {
 			continue
 		}
 		str := func(v string) string { s, _, _ := sk.GetStringValue(v); return strings.TrimSpace(s) }
-		sw := snapshot.Software{
-			Source:      snapshot.SourceWinRegistry,
-			PackageID:   name,
+		p := Package{
+			Source:      SourceWinRegistry,
+			ID:          name,
 			Name:        str("DisplayName"),
 			Publisher:   str("Publisher"),
 			Version:     str("DisplayVersion"),
@@ -189,18 +194,19 @@ func readUninstall(root registry.Key, path string, access uint32, arch, sid stri
 			InstallPath: strings.Trim(str("InstallLocation"), `"`),
 			InstallDate: str("InstallDate"),
 			UserSID:     sid,
+			Location:    location + `\` + name,
 		}
 		sc, _, _ := sk.GetIntegerValue("SystemComponent")
-		sw.SystemComponent = sc == 1
+		p.SystemComponent = sc == 1
 		parent, release := str("ParentKeyName"), str("ReleaseType")
 		sk.Close()
 
 		// Sem nome não há o que identificar; ParentKeyName e ReleaseType marcam
 		// atualizações e hotfixes, que pertencem a outro produto.
-		if sw.Name == "" || parent != "" || isUpdate(release) {
+		if p.Name == "" || parent != "" || isUpdate(release) {
 			continue
 		}
-		out = append(out, sw)
+		out = append(out, p)
 	}
 	return out, nil
 }

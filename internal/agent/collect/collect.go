@@ -1,21 +1,18 @@
-// Package collect monta o snapshot da máquina local. Cada coletor roda de
-// forma independente: se um falha, o erro vai para collector_errors e o
-// snapshot segue com o restante.
+// Package collect monta o snapshot da máquina local a partir do pkg/sysinfo.
+// Cada coletor roda de forma independente: se um falha, o erro vai para
+// collector_errors e o snapshot segue com o restante.
 package collect
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"runtime"
 	"time"
 
-	"github.com/turetos/invenire/pkg/snapshot"
+	"github.com/athosbes/invenire/pkg/snapshot"
+	"github.com/athosbes/invenire/pkg/sysinfo"
 )
-
-// ErrUnsupported indica coletor não implementado nesta plataforma.
-var ErrUnsupported = errors.New("não suportado nesta plataforma")
 
 type collector struct {
 	name string
@@ -23,24 +20,9 @@ type collector struct {
 }
 
 var collectors = []collector{
-	{"host", func(ctx context.Context, s *snapshot.Snapshot) (err error) {
-		s.Host, err = collectHost(ctx)
-		if s.Host.Hostname == "" {
-			s.Host.Hostname, _ = os.Hostname()
-		}
-		return err
-	}},
-	{"os", func(ctx context.Context, s *snapshot.Snapshot) (err error) {
-		s.OS, err = collectOS(ctx)
-		if s.OS.Arch == "" {
-			s.OS.Arch = runtime.GOARCH
-		}
-		return err
-	}},
-	{"software", func(ctx context.Context, s *snapshot.Snapshot) (err error) {
-		s.Software, err = collectSoftware(ctx)
-		return err
-	}},
+	{"host", collectHost},
+	{"os", collectOS},
+	{"software", collectSoftware},
 }
 
 // Collect roda todos os coletores e devolve o snapshot. Não devolve erro:
@@ -65,4 +47,59 @@ func runSafe(ctx context.Context, c collector, s *snapshot.Snapshot) (err error)
 		}
 	}()
 	return c.run(ctx, s)
+}
+
+func collectHost(ctx context.Context, s *snapshot.Snapshot) error {
+	sys, errSys := sysinfo.ReadSystem()
+	mid, errMID := sysinfo.MachineID()
+	s.Host = snapshot.Host{
+		SMBIOSUUID:   sys.UUID,
+		MachineID:    mid,
+		Serial:       sys.Serial,
+		Manufacturer: sys.Manufacturer,
+		Model:        sys.Product,
+	}
+	var errHost error
+	s.Host.Hostname, errHost = sysinfo.Hostname()
+	return errors.Join(errSys, errMID, errHost)
+}
+
+func collectOS(ctx context.Context, s *snapshot.Snapshot) error {
+	o, err := sysinfo.ReadOS()
+	s.OS = snapshot.OS{
+		Family:  o.Family,
+		Name:    o.Name,
+		Version: o.Version,
+		Build:   o.Build,
+		Kernel:  o.Kernel,
+		Arch:    o.Arch,
+		ID:      o.ID,
+	}
+	if s.OS.Family == "" {
+		s.OS.Family = "other"
+	}
+	if s.OS.Arch == "" {
+		s.OS.Arch = runtime.GOARCH
+	}
+	return err
+}
+
+func collectSoftware(ctx context.Context, s *snapshot.Snapshot) error {
+	pkgs, err := sysinfo.InstalledPackages(ctx)
+	s.Software = make([]snapshot.Software, 0, len(pkgs))
+	for _, p := range pkgs {
+		s.Software = append(s.Software, snapshot.Software{
+			Source:          p.Source,
+			PackageID:       p.ID,
+			Name:            p.Name,
+			Publisher:       p.Publisher,
+			Version:         p.Version,
+			Arch:            p.Arch,
+			InstallPath:     p.InstallPath,
+			InstallDate:     p.InstallDate,
+			UserSID:         p.UserSID,
+			SystemComponent: p.SystemComponent,
+		})
+	}
+	return err
 }

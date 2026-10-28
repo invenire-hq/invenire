@@ -1,4 +1,4 @@
-module github.com/turetos/invenire
+module github.com/athosbes/invenire
 
 go 1.26.1
 
