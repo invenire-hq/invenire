@@ -225,7 +225,9 @@ func (ca *CA) ServerCert(hosts []string) (tls.Certificate, error) {
 	if err != nil {
 		return tls.Certificate{}, err
 	}
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, nil
+	// A CA vai junto na cadeia: no primeiro contato o agente ainda não a tem
+	// e confere o certificado dela contra o pin que recebeu com o token.
+	return tls.Certificate{Certificate: [][]byte{der, ca.Cert.Raw}, PrivateKey: key, Leaf: leaf}, nil
 }
 
 // Fingerprint é o SHA-256 em hex do certificado DER: a chave de agent.cert_fingerprint.

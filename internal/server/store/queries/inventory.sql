@@ -59,8 +59,9 @@ UPDATE agent SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL;
 
 -- name: InsertSnapshot :one
 -- O SHA-256 é único: reenviar o mesmo snapshot devolve o existente.
-INSERT INTO snapshot (asset_id, agent_id, schema_version, collected_at, sha256, prev_sha256, payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+-- body são os bytes exatos; payload, o mesmo conteúdo como jsonb.
+INSERT INTO snapshot (asset_id, agent_id, schema_version, collected_at, sha256, prev_sha256, payload, body)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (sha256) DO UPDATE SET sha256 = EXCLUDED.sha256
 RETURNING id, (xmax = 0)::boolean AS inserted;
 
@@ -70,6 +71,21 @@ SELECT sha256 FROM snapshot
 WHERE asset_id = $1
 ORDER BY collected_at DESC, received_at DESC
 LIMIT 1;
+
+-- name: GetSnapshotBody :one
+-- Os bytes originais, para reconferir o hash ou entregar numa perícia.
+SELECT body FROM snapshot WHERE id = $1;
+
+-- name: VerifySnapshotChain :many
+-- Reconfere o histórico de um ativo só com os dados guardados: o hash de cada
+-- body e se o prev_sha256 de cada snapshot é o sha256 do anterior.
+SELECT id, collected_at,
+       COALESCE(sha256(body) = sha256, false)::boolean AS body_ok,
+       COALESCE(prev_sha256 IS NOT DISTINCT FROM lag(sha256) OVER w, false)::boolean AS chain_ok
+FROM snapshot
+WHERE asset_id = $1
+WINDOW w AS (ORDER BY collected_at, received_at)
+ORDER BY collected_at, received_at;
 
 -- name: ClaimUnprocessedSnapshots :many
 -- Pega snapshots para a ingestão. SKIP LOCKED permite vários workers.

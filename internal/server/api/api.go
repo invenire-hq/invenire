@@ -20,6 +20,7 @@ import (
 
 	"github.com/athosbes/invenire/internal/server/pki"
 	"github.com/athosbes/invenire/internal/server/store"
+	"github.com/athosbes/invenire/internal/wire"
 )
 
 // Server guarda as dependências dos handlers.
@@ -49,8 +50,8 @@ func (s *Server) Handler() http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("POST /v1/enroll", s.enroll)
-	mux.Handle("POST /v1/snapshots", s.agentAuth(http.HandlerFunc(s.postSnapshot)))
+	mux.HandleFunc("POST "+wire.PathEnroll, s.enroll)
+	mux.Handle("POST "+wire.PathSnapshots, s.agentAuth(http.HandlerFunc(s.postSnapshot)))
 	return mux
 }
 
@@ -139,5 +140,5 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	writeJSON(w, status, wire.Error{Error: msg})
 }

@@ -208,6 +208,18 @@ func (q *Queries) GetLastSnapshotHash(ctx context.Context, assetID uuid.UUID) ([
 	return sha256, err
 }
 
+const getSnapshotBody = `-- name: GetSnapshotBody :one
+SELECT body FROM snapshot WHERE id = $1
+`
+
+// Os bytes originais, para reconferir o hash ou entregar numa perícia.
+func (q *Queries) GetSnapshotBody(ctx context.Context, id uuid.UUID) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getSnapshotBody, id)
+	var body []byte
+	err := row.Scan(&body)
+	return body, err
+}
+
 const getTenantByName = `-- name: GetTenantByName :one
 SELECT id, name FROM tenant WHERE name = $1
 `
@@ -220,8 +232,8 @@ func (q *Queries) GetTenantByName(ctx context.Context, name string) (Tenant, err
 }
 
 const insertSnapshot = `-- name: InsertSnapshot :one
-INSERT INTO snapshot (asset_id, agent_id, schema_version, collected_at, sha256, prev_sha256, payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO snapshot (asset_id, agent_id, schema_version, collected_at, sha256, prev_sha256, payload, body)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (sha256) DO UPDATE SET sha256 = EXCLUDED.sha256
 RETURNING id, (xmax = 0)::boolean AS inserted
 `
@@ -234,6 +246,7 @@ type InsertSnapshotParams struct {
 	Sha256        []byte
 	PrevSha256    []byte
 	Payload       json.RawMessage
+	Body          []byte
 }
 
 type InsertSnapshotRow struct {
@@ -242,6 +255,7 @@ type InsertSnapshotRow struct {
 }
 
 // O SHA-256 é único: reenviar o mesmo snapshot devolve o existente.
+// body são os bytes exatos; payload, o mesmo conteúdo como jsonb.
 func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) (InsertSnapshotRow, error) {
 	row := q.db.QueryRow(ctx, insertSnapshot,
 		arg.AssetID,
@@ -251,6 +265,7 @@ func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) 
 		arg.Sha256,
 		arg.PrevSha256,
 		arg.Payload,
+		arg.Body,
 	)
 	var i InsertSnapshotRow
 	err := row.Scan(&i.ID, &i.Inserted)
@@ -382,4 +397,48 @@ func (q *Queries) UpsertAsset(ctx context.Context, arg UpsertAssetParams) (Upser
 		&i.Inserted,
 	)
 	return i, err
+}
+
+const verifySnapshotChain = `-- name: VerifySnapshotChain :many
+SELECT id, collected_at,
+       COALESCE(sha256(body) = sha256, false)::boolean AS body_ok,
+       COALESCE(prev_sha256 IS NOT DISTINCT FROM lag(sha256) OVER w, false)::boolean AS chain_ok
+FROM snapshot
+WHERE asset_id = $1
+WINDOW w AS (ORDER BY collected_at, received_at)
+ORDER BY collected_at, received_at
+`
+
+type VerifySnapshotChainRow struct {
+	ID          uuid.UUID
+	CollectedAt time.Time
+	BodyOk      bool
+	ChainOk     bool
+}
+
+// Reconfere o histórico de um ativo só com os dados guardados: o hash de cada
+// body e se o prev_sha256 de cada snapshot é o sha256 do anterior.
+func (q *Queries) VerifySnapshotChain(ctx context.Context, assetID uuid.UUID) ([]VerifySnapshotChainRow, error) {
+	rows, err := q.db.Query(ctx, verifySnapshotChain, assetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []VerifySnapshotChainRow
+	for rows.Next() {
+		var i VerifySnapshotChainRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CollectedAt,
+			&i.BodyOk,
+			&i.ChainOk,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

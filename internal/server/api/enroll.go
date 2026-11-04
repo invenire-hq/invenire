@@ -15,17 +15,16 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/athosbes/invenire/internal/server/store"
+	"github.com/athosbes/invenire/internal/wire"
 	"github.com/athosbes/invenire/pkg/snapshot"
 )
-
-const tokenPrefix = "inv_"
 
 // NewEnrollmentToken cria um token de cadastro de uso único. O valor só
 // existe na resposta: o banco guarda o SHA-256.
 func NewEnrollmentToken(ctx context.Context, q *store.Queries, tenantID uuid.UUID, description string, ttl time.Duration) (token string, expires time.Time, err error) {
 	b := make([]byte, 32)
 	rand.Read(b)
-	token = tokenPrefix + base64.RawURLEncoding.EncodeToString(b)
+	token = wire.TokenPrefix + base64.RawURLEncoding.EncodeToString(b)
 	h := sha256.Sum256([]byte(token))
 	row, err := q.CreateEnrollmentToken(ctx, store.CreateEnrollmentTokenParams{
 		TenantID:    tenantID,
@@ -36,35 +35,17 @@ func NewEnrollmentToken(ctx context.Context, q *store.Queries, tenantID uuid.UUI
 	return token, row.ExpiresAt, err
 }
 
-// EnrollRequest é o corpo de POST /v1/enroll.
-type EnrollRequest struct {
-	Token        string        `json:"token"`
-	CSR          string        `json:"csr"` // PEM, CERTIFICATE REQUEST
-	AgentVersion string        `json:"agent_version"`
-	Host         snapshot.Host `json:"host"`
-	OS           snapshot.OS   `json:"os"`
-}
-
-// EnrollResponse devolve o certificado do agente e a CA, que o agente passa
-// a usar para validar o servidor.
-type EnrollResponse struct {
-	AgentID     uuid.UUID `json:"agent_id"`
-	AssetID     uuid.UUID `json:"asset_id"`
-	Certificate string    `json:"certificate"`
-	CA          string    `json:"ca"`
-}
-
 const maxEnrollBody = 64 << 10
 
 func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
-	var req EnrollRequest
+	var req wire.EnrollRequest
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEnrollBody))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "corpo inválido: "+err.Error())
 		return
 	}
-	if !strings.HasPrefix(req.Token, tokenPrefix) || req.CSR == "" || req.AgentVersion == "" {
+	if !strings.HasPrefix(req.Token, wire.TokenPrefix) || req.CSR == "" || req.AgentVersion == "" {
 		writeError(w, http.StatusBadRequest, "token, csr e agent_version são obrigatórios")
 		return
 	}
@@ -74,7 +55,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var resp EnrollResponse
+	var resp wire.EnrollResponse
 	err := s.inTx(r.Context(), func(q *store.Queries) error {
 		h := sha256.Sum256([]byte(req.Token))
 		tok, err := q.ConsumeEnrollmentToken(r.Context(), h[:])
@@ -133,7 +114,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		resp = EnrollResponse{AgentID: agentID, AssetID: asset.ID, Certificate: string(certPEM), CA: string(s.ca.PEM())}
+		resp = wire.EnrollResponse{AgentID: agentID, AssetID: asset.ID, Certificate: string(certPEM), CA: string(s.ca.PEM())}
 		return nil
 	})
 	if err != nil {

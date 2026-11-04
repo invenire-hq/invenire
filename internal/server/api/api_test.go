@@ -24,6 +24,7 @@ import (
 	"github.com/athosbes/invenire/internal/server/pki"
 	"github.com/athosbes/invenire/internal/server/store"
 	"github.com/athosbes/invenire/internal/testdb"
+	"github.com/athosbes/invenire/internal/wire"
 	"github.com/athosbes/invenire/pkg/snapshot"
 )
 
@@ -98,11 +99,11 @@ func (e *env) post(c *http.Client, path string, body []byte, hdr map[string]stri
 var testHost = snapshot.Host{Hostname: "PMC-ARR-01", SMBIOSUUID: "081B0196-A1A3-65A2-8D37-08626699AC78"}
 
 // enroll gera a chave do agente, cadastra e devolve o certificado pronto.
-func (e *env) enroll(token string, host snapshot.Host) (int, api.EnrollResponse, *tls.Certificate) {
+func (e *env) enroll(token string, host snapshot.Host) (int, wire.EnrollResponse, *tls.Certificate) {
 	e.t.Helper()
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	csrDER, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "agente"}}, key)
-	body, _ := json.Marshal(api.EnrollRequest{
+	body, _ := json.Marshal(wire.EnrollRequest{
 		Token:        token,
 		CSR:          string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})),
 		AgentVersion: "0.1.0",
@@ -110,7 +111,7 @@ func (e *env) enroll(token string, host snapshot.Host) (int, api.EnrollResponse,
 		OS:           snapshot.OS{Family: "windows", Name: "Windows 11 Pro"},
 	})
 	status, b := e.post(e.client(nil), "/v1/enroll", body, nil)
-	var resp api.EnrollResponse
+	var resp wire.EnrollResponse
 	if status != http.StatusCreated {
 		return status, resp, nil
 	}
@@ -138,14 +139,14 @@ func gz(b []byte) []byte {
 	return buf.Bytes()
 }
 
-func (e *env) send(c *http.Client, body []byte, sum string) (int, api.SnapshotResponse, string) {
+func (e *env) send(c *http.Client, body []byte, sum string) (int, wire.SnapshotResponse, string) {
 	e.t.Helper()
 	status, b := e.post(c, "/v1/snapshots", gz(body), map[string]string{
 		"Content-Encoding": "gzip",
 		"Content-Type":     "application/json",
-		api.SHA256Header:   sum,
+		wire.SHA256Header:  sum,
 	})
-	var resp api.SnapshotResponse
+	var resp wire.SnapshotResponse
 	json.Unmarshal(b, &resp)
 	return status, resp, string(b)
 }
@@ -231,6 +232,18 @@ func TestSnapshots(t *testing.T) {
 	changes, _ := e.q.ListChangesAfter(context.Background(), store.ListChangesAfterParams{TenantID: e.tenant.ID, Limit: 10})
 	if last := changes[len(changes)-1]; last.Kind != "snapshot_chain_broken" || len(changes) != 3 {
 		t.Fatalf("esperava um snapshot_chain_broken no fim: %+v", changes)
+	}
+
+	// O histórico pode ser reconferido só com o que ficou no banco: os bytes
+	// batem com o hash e só o terceiro snapshot quebra o encadeamento.
+	chain, err := e.q.VerifySnapshotChain(context.Background(), enrolled.AssetID)
+	if err != nil || len(chain) != 3 {
+		t.Fatalf("verificação: %+v %v", chain, err)
+	}
+	for i, c := range chain {
+		if !c.BodyOk || c.ChainOk != (i != 2) {
+			t.Errorf("snapshot %d: body_ok=%v chain_ok=%v", i, c.BodyOk, c.ChainOk)
+		}
 	}
 
 	other := snapshot.Host{Hostname: "OUTRA", MachineID: "57cfe8c7-106c-48ba-b00b-3b4b61bd3d87"}

@@ -11,7 +11,8 @@ A arquitetura e o modelo de dados estão no documento
 - [x] `invenire-agent collect --out` offline
 - [x] Migrações v0 (goose), incluindo `actor`, `proposal` e `change_log`, e consultas sqlc em `internal/server/store`
 - [x] `invenire-server`: `POST /v1/enroll` (token de uso único, CSR, CA interna) e `POST /v1/snapshots` (mTLS, gzip, SHA-256, JSON Schema, encadeamento por `prev_sha256`)
-- [ ] Lado do agente: `enroll`, envio e fila local em disco
+- [x] `invenire-agent enroll` (CA conferida por pin) e `run` (coleta periódica, fila local em disco, envio com mTLS e gzip, espera exponencial)
+- [x] Bytes originais de cada snapshot guardados em `snapshot.body`, com o hash conferido pelo próprio banco
 - [ ] Ingestão com diff de instalações
 - [ ] Regras de normalização e lista de software não identificado
 
@@ -23,6 +24,30 @@ bin/invenire-agent collect --out snapshot.json
 ```
 
 No Linux, rode como root: `product_uuid` e `product_serial` só são legíveis por ele.
+
+### Cadastro e envio
+
+Como administrador (Windows) ou root (Linux):
+
+```sh
+invenire-agent enroll --server https://invenire.local:8443 --token inv_… --ca-pin sha256:…
+invenire-agent run               # coleta a cada 4h (--interval) e envia
+invenire-agent run --once        # uma coleta e uma tentativa de envio
+```
+
+O token e o pin vêm de `invenire-server token create`. O token também pode ir em
+`INVENIRE_ENROLL_TOKEN`, para não aparecer na lista de processos. No primeiro contato o agente
+só aceita o servidor se a cadeia TLS trouxer a CA com aquele SHA-256; depois, só confia nela.
+
+O estado fica em `%ProgramData%\Invenire` ou `/var/lib/invenire` (`--state-dir`): chave,
+certificado, CA, `agent.json`, o hash do último snapshot (para o `prev_sha256`) e a fila em
+`queue/`. No Windows o diretório passa a ter dono Administradores e acesso só de SYSTEM e
+Administradores; no Linux, 0700.
+
+A fila guarda até 100 snapshots (`--max-queue`) com os bytes exatos que serão enviados; o nome
+de cada arquivo traz o SHA-256, conferido antes do envio. O que o servidor recusa de vez vai para
+`queue/rejected/` com o motivo. Se o certificado for revogado, `run` para com erro e a fila
+fica intacta.
 
 Depois de mudar as structs de `pkg/snapshot`, regenere o schema:
 
@@ -54,6 +79,10 @@ SHA-256 da CA, que o agente usa para conferir o servidor no primeiro contato.
 | `GET /healthz` | nenhuma | 204 se o banco responde |
 
 Revogar um agente é preencher `agent.revoked_at`; a próxima requisição dele recebe 401.
+
+Cada snapshot é guardado duas vezes: `payload` (jsonb, para consultar) e `body` (os bytes
+exatos, comprimidos com lz4). Um `CHECK` garante `sha256(body) = sha256`, e a consulta
+`VerifySnapshotChain` reconfere hashes e encadeamento de um ativo só com o que está no banco.
 
 ## Banco de dados
 

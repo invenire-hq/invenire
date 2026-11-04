@@ -40,6 +40,18 @@ func Collect(ctx context.Context, agentVersion string) *snapshot.Snapshot {
 	return s
 }
 
+// Identity coleta só o host e o SO, que o cadastro precisa.
+func Identity(ctx context.Context) (snapshot.Host, snapshot.OS, error) {
+	s := snapshot.New("", time.Now())
+	var errs []error
+	for _, c := range []collector{{"host", collectHost}, {"os", collectOS}} {
+		if err := runSafe(ctx, c, s); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", c.name, err))
+		}
+	}
+	return s.Host, s.OS, errors.Join(errs...)
+}
+
 func runSafe(ctx context.Context, c collector, s *snapshot.Snapshot) (err error) {
 	defer func() {
 		if r := recover(); r != nil {

@@ -58,11 +58,20 @@ func TestInventoryFlow(t *testing.T) {
 	sum := sha256.Sum256(body)
 	snapParams := store.InsertSnapshotParams{
 		AssetID: a1.ID, AgentID: agent.ID, SchemaVersion: "1",
-		CollectedAt: time.Now(), Sha256: sum[:], Payload: body,
+		CollectedAt: time.Now(), Sha256: sum[:], Payload: body, Body: body,
 	}
 	s1, err := q.InsertSnapshot(ctx, snapParams)
 	if err != nil || !s1.Inserted {
 		t.Fatalf("snapshot: %+v %v", s1, err)
+	}
+	// body precisa bater com sha256: o banco recusa bytes adulterados.
+	forged := snapParams
+	forged.Sha256 = make([]byte, 32)
+	if _, err := q.InsertSnapshot(ctx, forged); err == nil {
+		t.Fatal("aceitou body que não bate com o sha256")
+	}
+	if got, err := q.GetSnapshotBody(ctx, s1.ID); err != nil || string(got) != string(body) {
+		t.Fatalf("body guardado: %q %v", got, err)
 	}
 	again, err := q.InsertSnapshot(ctx, snapParams)
 	if err != nil || again.Inserted || again.ID != s1.ID {

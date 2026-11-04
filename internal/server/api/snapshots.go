@@ -10,30 +10,18 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/athosbes/invenire/internal/server/store"
+	"github.com/athosbes/invenire/internal/wire"
 	"github.com/athosbes/invenire/pkg/snapshot"
 )
-
-// SHA256Header leva o SHA-256 (hex) do snapshot descomprimido, exatamente
-// como snapshot.Marshal o calculou.
-const SHA256Header = "Invenire-Snapshot-SHA256"
 
 const (
 	maxSnapshotWire = 32 << 20  // corpo como chega, em gzip
 	maxSnapshotBody = 128 << 20 // depois de descomprimido
 )
-
-// SnapshotResponse é a resposta de POST /v1/snapshots.
-type SnapshotResponse struct {
-	SnapshotID uuid.UUID `json:"snapshot_id"`
-	SHA256     string    `json:"sha256"`
-	// Duplicate indica que o snapshot já tinha sido recebido (reenvio da fila).
-	Duplicate bool `json:"duplicate"`
-}
 
 func compileSnapshotSchema() (*jsonschema.Schema, error) {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(snapshot.SchemaV1))
@@ -57,8 +45,8 @@ func (s *Server) postSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sum := snapshot.Sum(body)
-	if want := strings.ToLower(r.Header.Get(SHA256Header)); want != sum {
-		writeError(w, http.StatusBadRequest, "SHA-256 do corpo não confere com "+SHA256Header)
+	if want := strings.ToLower(r.Header.Get(wire.SHA256Header)); want != sum {
+		writeError(w, http.StatusBadRequest, "SHA-256 do corpo não confere com "+wire.SHA256Header)
 		return
 	}
 
@@ -77,7 +65,7 @@ func (s *Server) postSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	rawSum, _ := hex.DecodeString(sum)
 
-	var resp SnapshotResponse
+	var resp wire.SnapshotResponse
 	err = s.inTx(r.Context(), func(q *store.Queries) error {
 		asset, err := q.GetAsset(r.Context(), agent.AssetID)
 		if err != nil {
@@ -103,11 +91,12 @@ func (s *Server) postSnapshot(w http.ResponseWriter, r *http.Request) {
 			Sha256:        rawSum,
 			PrevSha256:    prev,
 			Payload:       body,
+			Body:          body,
 		})
 		if err != nil {
 			return err
 		}
-		resp = SnapshotResponse{SnapshotID: row.ID, SHA256: sum, Duplicate: !row.Inserted}
+		resp = wire.SnapshotResponse{SnapshotID: row.ID, SHA256: sum, Duplicate: !row.Inserted}
 
 		// Divergência no encadeamento vira alerta, não rejeição: o histórico
 		// pode ter buracos legítimos (fila local perdida, reinstalação).

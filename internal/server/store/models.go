@@ -109,6 +109,7 @@ type Snapshot struct {
 	PrevSha256    []byte
 	ProcessedAt   *time.Time
 	Payload       json.RawMessage
+	Body          []byte
 }
 
 type Software struct {
