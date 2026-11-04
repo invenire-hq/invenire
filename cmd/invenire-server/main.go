@@ -28,6 +28,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/athosbes/invenire/internal/server/api"
+	"github.com/athosbes/invenire/internal/server/ingest"
 	"github.com/athosbes/invenire/internal/server/pki"
 	"github.com/athosbes/invenire/internal/server/store"
 	"github.com/athosbes/invenire/migrations"
@@ -138,6 +139,18 @@ func runServe(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	// A ingestão roda no mesmo processo: acorda a cada snapshot novo e, sem
+	// aviso, procura pendentes a cada 30s (inclusive os de antes de subir).
+	worker := ingest.New(pool, log, nil)
+	srv.OnSnapshot = worker.Wake
+	ingestCtx, stopIngest := context.WithCancel(ctx)
+	ingestDone := make(chan struct{})
+	go func() {
+		defer close(ingestDone)
+		worker.Run(ingestCtx)
+	}()
+	// Antes de fechar o pool: a transação em curso termina ou é desfeita.
+	defer func() { stopIngest(); <-ingestDone }()
 
 	hs := &http.Server{
 		Addr:              *listen,

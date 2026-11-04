@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/athosbes/invenire/pkg/snapshot"
@@ -102,16 +103,23 @@ func collectSoftware(ctx context.Context, s *snapshot.Snapshot) error {
 	for _, p := range pkgs {
 		s.Software = append(s.Software, snapshot.Software{
 			Source:          p.Source,
-			PackageID:       p.ID,
-			Name:            p.Name,
-			Publisher:       p.Publisher,
-			Version:         p.Version,
-			Arch:            p.Arch,
-			InstallPath:     p.InstallPath,
-			InstallDate:     p.InstallDate,
+			PackageID:       noNUL(p.ID),
+			Name:            noNUL(p.Name),
+			Publisher:       noNUL(p.Publisher),
+			Version:         noNUL(p.Version),
+			Arch:            noNUL(p.Arch),
+			InstallPath:     noNUL(p.InstallPath),
+			InstallDate:     noNUL(p.InstallDate),
 			UserSID:         p.UserSID,
 			SystemComponent: p.SystemComponent,
 		})
 	}
 	return err
+}
+
+// noNUL tira caracteres NUL, que o servidor recusa (o jsonb do PostgreSQL
+// não os guarda). Aparecem em valores de registro gravados com o terminador
+// incluído no comprimento.
+func noNUL(s string) string {
+	return strings.ReplaceAll(s, "\x00", "")
 }

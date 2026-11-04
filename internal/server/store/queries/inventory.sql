@@ -86,14 +86,3 @@ FROM snapshot
 WHERE asset_id = $1
 WINDOW w AS (ORDER BY collected_at, received_at)
 ORDER BY collected_at, received_at;
-
--- name: ClaimUnprocessedSnapshots :many
--- Pega snapshots para a ingestão. SKIP LOCKED permite vários workers.
-SELECT id, asset_id, payload FROM snapshot
-WHERE processed_at IS NULL
-ORDER BY received_at
-LIMIT $1
-FOR UPDATE SKIP LOCKED;
-
--- name: MarkSnapshotProcessed :exec
-UPDATE snapshot SET processed_at = now() WHERE id = $1;

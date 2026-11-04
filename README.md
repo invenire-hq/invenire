@@ -13,7 +13,7 @@ A arquitetura e o modelo de dados estão no documento
 - [x] `invenire-server`: `POST /v1/enroll` (token de uso único, CSR, CA interna) e `POST /v1/snapshots` (mTLS, gzip, SHA-256, JSON Schema, encadeamento por `prev_sha256`)
 - [x] `invenire-agent enroll` (CA conferida por pin) e `run` (coleta periódica, fila local em disco, envio com mTLS e gzip, espera exponencial)
 - [x] Bytes originais de cada snapshot guardados em `snapshot.body`, com o hash conferido pelo próprio banco
-- [ ] Ingestão com diff de instalações
+- [x] Ingestão com diff de instalações (`internal/server/ingest`)
 - [ ] Regras de normalização e lista de software não identificado
 
 ## Uso
@@ -83,6 +83,36 @@ Revogar um agente é preencher `agent.revoked_at`; a próxima requisição dele 
 Cada snapshot é guardado duas vezes: `payload` (jsonb, para consultar) e `body` (os bytes
 exatos, comprimidos com lz4). Um `CHECK` garante `sha256(body) = sha256`, e a consulta
 `VerifySnapshotChain` reconfere hashes e encadeamento de um ativo só com o que está no banco.
+
+### Ingestão
+
+O `serve` roda a ingestão no mesmo processo. Ela acorda a cada snapshot novo e, sem aviso,
+procura pendentes a cada 30s, inclusive os que chegaram antes de o servidor subir. Cada
+snapshot é aplicado numa transação, em ordem de coleta:
+
+1. Cada software vira um nome bruto em `software_raw`. Os ainda sem produto passam pelas
+   regras de normalização (o `Normalizer`; nenhuma regra existe ainda).
+2. Hostname, SO, fabricante e modelo do ativo são atualizados, com `asset_changed` no
+   `change_log` quando mudam.
+3. O software identificado é comparado com as instalações abertas do ativo, pela chave
+   versão + caminho. As novas abrem (`software_installed`), as presentes recebem
+   `last_snapshot_id` e as ausentes fecham com `removed_at` (`software_removed`). Uma
+   reinstalação abre uma linha nova, e a antiga fica no histórico.
+
+Casos que não mexem no estado atual:
+
+- **Software sem produto** não vira instalação. Fica na lista de não identificados até ser
+  mapeado; entra no próximo snapshot do ativo.
+- **Coletor de software com erro** (`collector_errors`): a lista pode estar incompleta, então
+  nada é fechado.
+- **Snapshot fora de ordem** (coletado antes do último já aplicado): só alimenta
+  `software_raw`, e o `change_log` registra `snapshot_out_of_order`.
+- **Payload ilegível**: fica com o motivo em `snapshot.ingest_error` e não trava a fila.
+
+Texto vindo da máquina (nomes, fabricante, versão, caminho, hostname) é gravado sem
+caracteres de controle nem de formatação invisíveis e truncado: quem controla a máquina
+controla esse texto, e ele chega a agentes de IA. Um snapshot com `\u0000` é recusado com 422
+pelo `POST /v1/snapshots`, porque o jsonb não o guarda; o agente já tira NUL na coleta.
 
 ## Banco de dados
 

@@ -13,41 +13,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const claimUnprocessedSnapshots = `-- name: ClaimUnprocessedSnapshots :many
-SELECT id, asset_id, payload FROM snapshot
-WHERE processed_at IS NULL
-ORDER BY received_at
-LIMIT $1
-FOR UPDATE SKIP LOCKED
-`
-
-type ClaimUnprocessedSnapshotsRow struct {
-	ID      uuid.UUID
-	AssetID uuid.UUID
-	Payload json.RawMessage
-}
-
-// Pega snapshots para a ingestão. SKIP LOCKED permite vários workers.
-func (q *Queries) ClaimUnprocessedSnapshots(ctx context.Context, limit int32) ([]ClaimUnprocessedSnapshotsRow, error) {
-	rows, err := q.db.Query(ctx, claimUnprocessedSnapshots, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ClaimUnprocessedSnapshotsRow
-	for rows.Next() {
-		var i ClaimUnprocessedSnapshotsRow
-		if err := rows.Scan(&i.ID, &i.AssetID, &i.Payload); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const consumeEnrollmentToken = `-- name: ConsumeEnrollmentToken :one
 SELECT id, tenant_id FROM enrollment_token
 WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
@@ -283,15 +248,6 @@ type MarkEnrollmentTokenUsedParams struct {
 
 func (q *Queries) MarkEnrollmentTokenUsed(ctx context.Context, arg MarkEnrollmentTokenUsedParams) error {
 	_, err := q.db.Exec(ctx, markEnrollmentTokenUsed, arg.ID, arg.UsedBy)
-	return err
-}
-
-const markSnapshotProcessed = `-- name: MarkSnapshotProcessed :exec
-UPDATE snapshot SET processed_at = now() WHERE id = $1
-`
-
-func (q *Queries) MarkSnapshotProcessed(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, markSnapshotProcessed, id)
 	return err
 }
 

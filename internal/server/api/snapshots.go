@@ -120,6 +120,8 @@ func (s *Server) postSnapshot(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusAccepted
 	if resp.Duplicate {
 		status = http.StatusOK
+	} else if s.OnSnapshot != nil {
+		s.OnSnapshot()
 	}
 	s.log.InfoContext(r.Context(), "snapshot recebido", "agent_id", agent.ID, "snapshot_id", resp.SnapshotID, "duplicate", resp.Duplicate, "bytes", len(body))
 	writeJSON(w, status, resp)
@@ -163,6 +165,12 @@ func (s *Server) validate(body []byte) (*snapshot.Snapshot, error) {
 	if err := s.schema.Validate(inst); err != nil {
 		return nil, errorf(http.StatusUnprocessableEntity, "snapshot fora do schema: %s", err)
 	}
+	// O jsonb do PostgreSQL não guarda \u0000. Recusar aqui (422) manda o
+	// snapshot para o rejected/ do agente; deixar o INSERT falhar daria 500,
+	// e o agente tentaria de novo para sempre, travando a fila.
+	if hasNULEscape(body) {
+		return nil, errorf(http.StatusUnprocessableEntity, "snapshot com \\u0000 num texto, que o PostgreSQL não guarda")
+	}
 	var snap snapshot.Snapshot
 	if err := json.Unmarshal(body, &snap); err != nil {
 		return nil, errorf(http.StatusBadRequest, "JSON inválido: %s", err)
@@ -171,4 +179,25 @@ func (s *Server) validate(body []byte) (*snapshot.Snapshot, error) {
 		return nil, errorf(http.StatusUnprocessableEntity, "%s", err)
 	}
 	return &snap, nil
+}
+
+// hasNULEscape diz se o JSON tem um \u0000 de verdade, e não o texto
+// "\\u0000" (barra escapada seguida de u0000).
+func hasNULEscape(body []byte) bool {
+	const esc = `\u0000`
+	for i := 0; ; {
+		j := bytes.Index(body[i:], []byte(esc))
+		if j < 0 {
+			return false
+		}
+		j += i
+		n := 0 // barras antes desta
+		for k := j - 1; k >= 0 && body[k] == '\\'; k-- {
+			n++
+		}
+		if n%2 == 0 {
+			return true
+		}
+		i = j + len(esc)
+	}
 }

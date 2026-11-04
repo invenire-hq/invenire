@@ -80,11 +80,11 @@ func TestInventoryFlow(t *testing.T) {
 	if last, err := q.GetLastSnapshotHash(ctx, a1.ID); err != nil || string(last) != string(sum[:]) {
 		t.Fatalf("último hash: %x %v", last, err)
 	}
-	claimed, err := q.ClaimUnprocessedSnapshots(ctx, 10)
-	if err != nil || len(claimed) != 1 {
+	claimed, err := q.ClaimNextSnapshot(ctx)
+	if err != nil || claimed.ID != s1.ID {
 		t.Fatalf("claim: %+v %v", claimed, err)
 	}
-	if err := q.MarkSnapshotProcessed(ctx, s1.ID); err != nil {
+	if err := q.FinishSnapshot(ctx, store.FinishSnapshotParams{ID: s1.ID}); err != nil {
 		t.Fatal(err)
 	}
 

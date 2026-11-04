@@ -30,6 +30,10 @@ type Server struct {
 	ca     *pki.CA
 	schema *jsonschema.Schema
 	log    *slog.Logger
+
+	// OnSnapshot, se definido, é chamado depois que um snapshot novo é
+	// gravado (não para repetidos). O serve liga aqui o Wake da ingestão.
+	OnSnapshot func()
 }
 
 func New(pool *pgxpool.Pool, ca *pki.CA, log *slog.Logger) (*Server, error) {

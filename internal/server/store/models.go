@@ -110,6 +110,7 @@ type Snapshot struct {
 	ProcessedAt   *time.Time
 	Payload       json.RawMessage
 	Body          []byte
+	IngestError   *string
 }
 
 type Software struct {

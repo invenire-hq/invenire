@@ -286,3 +286,26 @@ func TestForeignCA(t *testing.T) {
 		t.Fatalf("certificado de outra CA aceito: %d", resp.StatusCode)
 	}
 }
+
+func TestNULInSnapshot(t *testing.T) {
+	e := newEnv(t)
+	_, _, cert := e.enroll(e.token(), testHost)
+	agent := e.client(cert)
+
+	// NUL num texto: o jsonb não guarda, e a recusa precisa ser definitiva
+	// (422) para não travar a fila do agente.
+	nul := newSnapshot(testHost, "")
+	nul.Software[0].Name = "Chrome\x00lixo"
+	b, sum, _ := snapshot.Marshal(nul)
+	if status, _, msg := e.send(agent, b, sum); status != http.StatusUnprocessableEntity {
+		t.Fatalf("NUL: %d %s", status, msg)
+	}
+
+	// O texto "\u0000" (barra, u, zeros) é outra coisa e passa.
+	lit := newSnapshot(testHost, "")
+	lit.Software[0].Name = `C:\u0000`
+	b, sum, _ = snapshot.Marshal(lit)
+	if status, _, msg := e.send(agent, b, sum); status != http.StatusAccepted {
+		t.Fatalf("\\u0000 literal: %d %s", status, msg)
+	}
+}
