@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/athosbes/invenire/internal/server/normalize"
 	"github.com/athosbes/invenire/internal/server/pki"
 	"github.com/athosbes/invenire/internal/server/store"
 	"github.com/athosbes/invenire/internal/wire"
@@ -31,9 +32,14 @@ type Server struct {
 	schema *jsonschema.Schema
 	log    *slog.Logger
 
-	// OnSnapshot, se definido, é chamado depois que um snapshot novo é
-	// gravado (não para repetidos). O serve liga aqui o Wake da ingestão.
-	OnSnapshot func()
+	// Wake, se definido, é chamado quando há trabalho para a ingestão: um
+	// snapshot novo (não repetido) ou um mapeamento manual. O serve liga aqui
+	// o Wake do worker.
+	Wake func()
+
+	// Suggest, se definido, dá o palpite das regras para cada nome da lista
+	// de não identificados.
+	Suggest func(source, rawName, rawVendor string) (normalize.Match, bool)
 }
 
 func New(pool *pgxpool.Pool, ca *pki.CA, log *slog.Logger) (*Server, error) {
@@ -56,6 +62,8 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("POST "+wire.PathEnroll, s.enroll)
 	mux.Handle("POST "+wire.PathSnapshots, s.agentAuth(http.HandlerFunc(s.postSnapshot)))
+	mux.Handle("GET /v1/software/unmapped", s.userAuth(scopeRead, s.listUnmapped))
+	mux.Handle("PUT /v1/software/raw/{id}", s.userAuth(scopeAdmin, s.mapRaw))
 	return mux
 }
 

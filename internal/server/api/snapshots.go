@@ -120,8 +120,8 @@ func (s *Server) postSnapshot(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusAccepted
 	if resp.Duplicate {
 		status = http.StatusOK
-	} else if s.OnSnapshot != nil {
-		s.OnSnapshot()
+	} else if s.Wake != nil {
+		s.Wake()
 	}
 	s.log.InfoContext(r.Context(), "snapshot recebido", "agent_id", agent.ID, "snapshot_id", resp.SnapshotID, "duplicate", resp.Duplicate, "bytes", len(body))
 	writeJSON(w, status, resp)

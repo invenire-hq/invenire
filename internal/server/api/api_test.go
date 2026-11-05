@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/athosbes/invenire/internal/server/api"
 	"github.com/athosbes/invenire/internal/server/pki"
 	"github.com/athosbes/invenire/internal/server/store"
@@ -30,6 +32,8 @@ import (
 
 type env struct {
 	t      *testing.T
+	pool   *pgxpool.Pool
+	api    *api.Server
 	q      *store.Queries
 	srv    *httptest.Server
 	ca     *pki.CA
@@ -60,7 +64,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &env{t: t, q: q, srv: srv, ca: ca, tenant: tenant}
+	return &env{t: t, pool: pool, api: s, q: q, srv: srv, ca: ca, tenant: tenant}
 }
 
 func (e *env) token() string {

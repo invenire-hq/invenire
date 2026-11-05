@@ -133,7 +133,7 @@ func (q *Queries) GetActiveAgentByCert(ctx context.Context, certFingerprint stri
 }
 
 const getAsset = `-- name: GetAsset :one
-SELECT id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at FROM asset WHERE id = $1
+SELECT id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at, remap_pending FROM asset WHERE id = $1
 `
 
 func (q *Queries) GetAsset(ctx context.Context, id uuid.UUID) (Asset, error) {
@@ -154,6 +154,7 @@ func (q *Queries) GetAsset(ctx context.Context, id uuid.UUID) (Asset, error) {
 		&i.Criticality,
 		&i.FirstSeenAt,
 		&i.LastSeenAt,
+		&i.RemapPending,
 	)
 	return i, err
 }
@@ -287,7 +288,7 @@ ON CONFLICT (tenant_id, fingerprint) DO UPDATE SET
   os_name      = EXCLUDED.os_name,
   os_version   = EXCLUDED.os_version,
   last_seen_at = now()
-RETURNING id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at, (xmax = 0)::boolean AS inserted
+RETURNING id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at, remap_pending, (xmax = 0)::boolean AS inserted
 `
 
 type UpsertAssetParams struct {
@@ -317,6 +318,7 @@ type UpsertAssetRow struct {
 	Criticality  *int16
 	FirstSeenAt  time.Time
 	LastSeenAt   time.Time
+	RemapPending bool
 	Inserted     bool
 }
 
@@ -350,6 +352,7 @@ func (q *Queries) UpsertAsset(ctx context.Context, arg UpsertAssetParams) (Upser
 		&i.Criticality,
 		&i.FirstSeenAt,
 		&i.LastSeenAt,
+		&i.RemapPending,
 		&i.Inserted,
 	)
 	return i, err

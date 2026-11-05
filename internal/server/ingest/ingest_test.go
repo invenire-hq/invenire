@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/athosbes/invenire/internal/server/ingest"
+	"github.com/athosbes/invenire/internal/server/normalize"
 	"github.com/athosbes/invenire/internal/server/store"
 	"github.com/athosbes/invenire/internal/testdb"
 	"github.com/athosbes/invenire/pkg/snapshot"
@@ -24,11 +25,11 @@ var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 // rules reconhece só o Chrome, como faria uma regra de normalização.
 type rules struct{}
 
-func (rules) Normalize(source, name, vendor string) (ingest.Match, bool) {
+func (rules) Normalize(source, name, vendor string) (normalize.Match, bool) {
 	if strings.HasPrefix(name, "Google Chrome") {
-		return ingest.Match{Vendor: "Google", Product: "Chrome", Confidence: 1, Rule: "test:chrome"}, true
+		return normalize.Match{Vendor: "Google", Product: "Chrome", Confidence: 1, Rule: "test:chrome"}, true
 	}
-	return ingest.Match{}, false
+	return normalize.Match{}, false
 }
 
 type fixture struct {

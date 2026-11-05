@@ -53,9 +53,12 @@ JOIN (SELECT unnest(sqlc.arg(sources)::text[]) AS source,
   USING (source, raw_name, raw_vendor);
 
 -- name: InsertSoftwareVersions :exec
-INSERT INTO software_version (software_id, version)
-SELECT unnest(sqlc.arg(software_ids)::uuid[]), unnest(sqlc.arg(versions)::text[])
-ON CONFLICT (software_id, version) DO NOTHING;
+-- purl vazio vira nulo. Sem alvo no ON CONFLICT: um purl que já pertence a
+-- outra versão também é ignorado, e quem chama repete sem purl.
+INSERT INTO software_version (software_id, version, purl)
+SELECT unnest(sqlc.arg(software_ids)::uuid[]), unnest(sqlc.arg(versions)::text[]),
+       NULLIF(unnest(sqlc.arg(purls)::text[]), '')
+ON CONFLICT DO NOTHING;
 
 -- name: GetSoftwareVersions :many
 SELECT v.id, v.software_id, v.version

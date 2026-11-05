@@ -31,6 +31,16 @@ type Agent struct {
 	RevokedAt       *time.Time
 }
 
+type ApiToken struct {
+	ID          uuid.UUID
+	ActorID     uuid.UUID
+	TokenHash   []byte
+	Description string
+	CreatedAt   time.Time
+	ExpiresAt   *time.Time
+	RevokedAt   *time.Time
+}
+
 type Asset struct {
 	ID           uuid.UUID
 	TenantID     uuid.UUID
@@ -46,6 +56,12 @@ type Asset struct {
 	Criticality  *int16
 	FirstSeenAt  time.Time
 	LastSeenAt   time.Time
+	RemapPending bool
+}
+
+type AssetSoftwareRaw struct {
+	AssetID       uuid.UUID
+	SoftwareRawID uuid.UUID
 }
 
 type ChangeLog struct {

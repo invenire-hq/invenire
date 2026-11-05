@@ -29,6 +29,7 @@ import (
 
 	"github.com/athosbes/invenire/internal/server/api"
 	"github.com/athosbes/invenire/internal/server/ingest"
+	"github.com/athosbes/invenire/internal/server/normalize"
 	"github.com/athosbes/invenire/internal/server/pki"
 	"github.com/athosbes/invenire/internal/server/store"
 	"github.com/athosbes/invenire/migrations"
@@ -44,6 +45,8 @@ comandos:
   serve                       aplica as migrações e sobe a API (HTTPS com mTLS)
   tenant create <nome>        cria um tenant
   token create --tenant <n>   cria um token de cadastro de agente, de uso único
+  actor create --tenant <n> --name <nome> --scopes read,admin
+                              cria um usuário ou pipeline e um token de API para ele
   version                     mostra a versão
 
 A conexão com o PostgreSQL vem de INVENIRE_DATABASE_URL.
@@ -66,6 +69,8 @@ func main() {
 		err = runTenantCreate(ctx, os.Args[3:])
 	case cmd == "token create":
 		err = runTokenCreate(ctx, os.Args[3:])
+	case cmd == "actor create":
+		err = runActorCreate(ctx, os.Args[3:])
 	case os.Args[1] == "version" || os.Args[1] == "--version":
 		fmt.Println(version)
 	case os.Args[1] == "help" || os.Args[1] == "-h" || os.Args[1] == "--help":
@@ -114,7 +119,12 @@ func runServe(ctx context.Context, args []string) error {
 	listen := fs.String("listen", ":8443", "endereço de escuta")
 	dataDir := fs.String("data", "data", "diretório de dados (chave e certificado da CA)")
 	hosts := fs.String("hosts", "localhost,127.0.0.1", "nomes e IPs do certificado TLS do servidor, separados por vírgula")
+	minConf := fs.Float64("auto-map-confidence", normalize.DefaultMinConfidence,
+		"confiança mínima para uma regra mapear software sem revisão (0 a 1)")
 	fs.Parse(args)
+	if *minConf <= 0 || *minConf > 1 {
+		return errors.New("--auto-map-confidence precisa estar entre 0 (exclusive) e 1")
+	}
 
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 
@@ -139,10 +149,17 @@ func runServe(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	// A ingestão roda no mesmo processo: acorda a cada snapshot novo e, sem
-	// aviso, procura pendentes a cada 30s (inclusive os de antes de subir).
-	worker := ingest.New(pool, log, nil)
-	srv.OnSnapshot = worker.Wake
+	rules, err := normalize.Default()
+	if err != nil {
+		return err
+	}
+	rules.MinConfidence = float32(*minConf)
+	// A ingestão roda no mesmo processo. Ao subir, reaplica as regras (que
+	// podem ter mudado com a versão); depois acorda a cada snapshot novo ou
+	// mapeamento manual e, sem aviso, procura pendentes a cada 30s.
+	worker := ingest.New(pool, log, rules)
+	srv.Wake = worker.Wake
+	srv.Suggest = rules.Evaluate
 	ingestCtx, stopIngest := context.WithCancel(ctx)
 	ingestDone := make(chan struct{})
 	go func() {
@@ -236,6 +253,57 @@ func runTokenCreate(ctx context.Context, args []string) error {
 		}
 	} else {
 		fmt.Fprintf(os.Stderr, "aviso: sem pin da CA (%v); o agente terá de confiar no servidor no primeiro contato\n", err)
+	}
+	return nil
+}
+
+func runActorCreate(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("actor create", flag.ExitOnError)
+	tenant := fs.String("tenant", "", "nome do tenant (obrigatório)")
+	name := fs.String("name", "", "nome do usuário ou pipeline (obrigatório)")
+	kind := fs.String("kind", "human", "human, ai_agent ou ci")
+	scopes := fs.String("scopes", "read", "escopos separados por vírgula: read, admin")
+	ttl := fs.Duration("ttl", 0, "validade do token (0 = não expira)")
+	desc := fs.String("description", "", "para que é o token")
+	fs.Parse(args)
+	if *tenant == "" || *name == "" {
+		return errors.New("--tenant e --name são obrigatórios")
+	}
+	switch *kind {
+	case "human", "ai_agent", "ci":
+	default:
+		return fmt.Errorf("--kind %q: use human, ai_agent ou ci", *kind)
+	}
+	var sc []string
+	for _, s := range strings.Split(*scopes, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			sc = append(sc, s)
+		}
+	}
+	if err := migrate(ctx); err != nil {
+		return fmt.Errorf("migrações: %w", err)
+	}
+	pool, err := connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	q := store.New(pool)
+	t, err := q.GetTenantByName(ctx, *tenant)
+	if err != nil {
+		return fmt.Errorf("tenant %q: %w", *tenant, err)
+	}
+	a, err := q.CreateActor(ctx, store.CreateActorParams{TenantID: t.ID, Kind: *kind, Name: *name, Scopes: sc})
+	if err != nil {
+		return err
+	}
+	token, expires, err := api.NewAPIToken(ctx, q, a.ID, *desc, *ttl)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("ator:    %s (%s, %s)\ntoken:   %s\n", a.ID, a.Kind, strings.Join(a.Scopes, ","), token)
+	if expires != nil {
+		fmt.Printf("expira:  %s\n", expires.Format(time.RFC3339))
 	}
 	return nil
 }

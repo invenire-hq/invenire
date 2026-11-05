@@ -166,18 +166,22 @@ func (q *Queries) InsertSoftwareRaws(ctx context.Context, arg InsertSoftwareRaws
 }
 
 const insertSoftwareVersions = `-- name: InsertSoftwareVersions :exec
-INSERT INTO software_version (software_id, version)
-SELECT unnest($1::uuid[]), unnest($2::text[])
-ON CONFLICT (software_id, version) DO NOTHING
+INSERT INTO software_version (software_id, version, purl)
+SELECT unnest($1::uuid[]), unnest($2::text[]),
+       NULLIF(unnest($3::text[]), '')
+ON CONFLICT DO NOTHING
 `
 
 type InsertSoftwareVersionsParams struct {
 	SoftwareIds []uuid.UUID
 	Versions    []string
+	Purls       []string
 }
 
+// purl vazio vira nulo. Sem alvo no ON CONFLICT: um purl que já pertence a
+// outra versão também é ignorado, e quem chama repete sem purl.
 func (q *Queries) InsertSoftwareVersions(ctx context.Context, arg InsertSoftwareVersionsParams) error {
-	_, err := q.db.Exec(ctx, insertSoftwareVersions, arg.SoftwareIds, arg.Versions)
+	_, err := q.db.Exec(ctx, insertSoftwareVersions, arg.SoftwareIds, arg.Versions, arg.Purls)
 	return err
 }
 
@@ -245,7 +249,7 @@ func (q *Queries) ListInstallationsWithSoftware(ctx context.Context, assetID uui
 }
 
 const lockAsset = `-- name: LockAsset :one
-SELECT id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at FROM asset WHERE id = $1 FOR UPDATE
+SELECT id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at, remap_pending FROM asset WHERE id = $1 FOR UPDATE
 `
 
 // Serializa a ingestão de um mesmo ativo: o diff depende das instalações
@@ -268,6 +272,7 @@ func (q *Queries) LockAsset(ctx context.Context, id uuid.UUID) (Asset, error) {
 		&i.Criticality,
 		&i.FirstSeenAt,
 		&i.LastSeenAt,
+		&i.RemapPending,
 	)
 	return i, err
 }

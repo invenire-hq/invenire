@@ -14,7 +14,7 @@ A arquitetura e o modelo de dados estão no documento
 - [x] `invenire-agent enroll` (CA conferida por pin) e `run` (coleta periódica, fila local em disco, envio com mTLS e gzip, espera exponencial)
 - [x] Bytes originais de cada snapshot guardados em `snapshot.body`, com o hash conferido pelo próprio banco
 - [x] Ingestão com diff de instalações (`internal/server/ingest`)
-- [ ] Regras de normalização e lista de software não identificado
+- [x] Regras de normalização (`internal/server/normalize`), lista de software não identificado e mapeamento manual pela API
 
 ## Uso
 
@@ -63,6 +63,7 @@ go build -o bin/ ./cmd/invenire-server
 bin/invenire-server serve --listen :8443 --data data --hosts invenire.local,10.0.0.5
 bin/invenire-server tenant create "Prefeitura"
 bin/invenire-server token create --tenant "Prefeitura" --ttl 24h --description "lote 1"
+bin/invenire-server actor create --tenant "Prefeitura" --name "athos" --scopes read,admin
 ```
 
 `serve` aplica as migrações e, na primeira vez, cria a CA interna em `data/ca/`. Guarde
@@ -76,9 +77,17 @@ SHA-256 da CA, que o agente usa para conferir o servidor no primeiro contato.
 |---|---|---|
 | `POST /v1/enroll` | token de cadastro | recebe CSR e dados do host; devolve certificado cliente e CA |
 | `POST /v1/snapshots` | certificado cliente de agente não revogado | recebe o snapshot (gzip opcional) com o SHA-256 no cabeçalho `Invenire-Snapshot-SHA256`; 202 se novo, 200 se repetido |
+| `GET /v1/software/unmapped` | token de API, escopo `read` | nomes sem produto nos ativos do tenant, dos mais comuns para os menos, com o palpite das regras (`?source=`, `?limit=`, `?cursor=`) |
+| `PUT /v1/software/raw/{id}` | token de API, escopo `admin` | mapeamento manual: `{"vendor": "…", "product": "…"}` |
 | `GET /healthz` | nenhuma | 204 se o banco responde |
 
 Revogar um agente é preencher `agent.revoked_at`; a próxima requisição dele recebe 401.
+
+`actor create` cria um usuário ou pipeline (`--kind human|ai_agent|ci`) e mostra um token de
+API (`inva_…`, enviado como `Authorization: Bearer`). Só o SHA-256 fica em `api_token`;
+revogar é preencher `revoked_at`. As respostas trazem `as_of`, o último `change_log.id`
+considerado. Na lista de não identificados, nome e fabricante vêm dentro de `collected`:
+foram escritos na máquina inventariada e são dado, não instrução.
 
 Cada snapshot é guardado duas vezes: `payload` (jsonb, para consultar) e `body` (os bytes
 exatos, comprimidos com lz4). Um `CHECK` garante `sha256(body) = sha256`, e a consulta
@@ -91,7 +100,8 @@ procura pendentes a cada 30s, inclusive os que chegaram antes de o servidor subi
 snapshot é aplicado numa transação, em ordem de coleta:
 
 1. Cada software vira um nome bruto em `software_raw`. Os ainda sem produto passam pelas
-   regras de normalização (o `Normalizer`; nenhuma regra existe ainda).
+   regras de normalização (abaixo). Pacotes Linux levam o PURL na versão
+   (`pkg:deb/ubuntu/curl@8.5.0-2ubuntu10.4`).
 2. Hostname, SO, fabricante e modelo do ativo são atualizados, com `asset_changed` no
    `change_log` quando mudam.
 3. O software identificado é comparado com as instalações abertas do ativo, pela chave
@@ -102,7 +112,7 @@ snapshot é aplicado numa transação, em ordem de coleta:
 Casos que não mexem no estado atual:
 
 - **Software sem produto** não vira instalação. Fica na lista de não identificados até ser
-  mapeado; entra no próximo snapshot do ativo.
+  mapeado.
 - **Coletor de software com erro** (`collector_errors`): a lista pode estar incompleta, então
   nada é fechado.
 - **Snapshot fora de ordem** (coletado antes do último já aplicado): só alimenta
@@ -113,6 +123,30 @@ Texto vindo da máquina (nomes, fabricante, versão, caminho, hostname) é grava
 caracteres de controle nem de formatação invisíveis e truncado: quem controla a máquina
 controla esse texto, e ele chega a agentes de IA. Um snapshot com `\u0000` é recusado com 422
 pelo `POST /v1/snapshots`, porque o jsonb não o guarda; o agente já tira NUL na coleta.
+
+### Normalização
+
+`internal/server/normalize` reconhece o produto de cada nome bruto, nesta ordem:
+
+| Regra | Exemplo | Confiança |
+|---|---|---|
+| Catálogo (`catalog.json`) | "Google Chrome" (registro) e `google-chrome-stable` (dpkg) → Google Chrome | 1 |
+| Pacote Linux | `curl` (dpkg ou rpm) → curl | 1 |
+| Heurística do Windows | "Cisco Packet Tracer 8.2.2 64Bit" de "Cisco Systems, Inc." → Cisco Systems / Packet Tracer | 0,7 com fabricante, 0,5 sem |
+
+Só o que atinge `--auto-map-confidence` (padrão 0,9) é mapeado sem revisão; abaixo disso, o
+resultado aparece como `suggestion` na lista de não identificados. Mapeamento manual nunca é
+mudado por regra.
+
+Quando um nome é mapeado, por regra ou à mão, os ativos que o têm (`asset_software_raw`)
+ficam com `remap_pending`, e a ingestão recalcula as instalações deles a partir do último
+snapshot, sem esperar o próximo. Ao subir, o `serve` passa as regras de novo sobre todos os
+nomes que elas podem mudar: um catálogo novo vale para o que já foi ingerido, e uma regra
+retirada desfaz o que tinha mapeado.
+
+Para acrescentar um produto ao catálogo, inclua uma entrada com `id`, `vendor`, `product`
+(aceita `$1` dos grupos) e uma expressão por fonte em `match`. `publisher` exige o
+fabricante, para nomes fáceis de imitar. Rode `go test ./internal/server/normalize`.
 
 ## Banco de dados
 

@@ -1,0 +1,194 @@
+[
+  {"id": "chrome", "vendor": "Google", "product": "Chrome", "match": [
+    {"sources": ["win_registry"], "name": "^Google Chrome$", "publisher": "^Google"},
+    {"sources": ["dpkg", "rpm"], "name": "^google-chrome-(?:stable|beta|unstable)$"}
+  ]},
+  {"id": "firefox-esr", "vendor": "Mozilla", "product": "Firefox ESR", "match": [
+    {"sources": ["win_registry"], "name": "^Mozilla Firefox(?: [\\d.]+)? ESR\\b", "publisher": "^Mozilla"},
+    {"sources": ["win_registry"], "name": "^Mozilla Firefox ESR\\b", "publisher": "^Mozilla"},
+    {"sources": ["dpkg", "rpm"], "name": "^firefox-esr$"}
+  ]},
+  {"id": "firefox", "vendor": "Mozilla", "product": "Firefox", "match": [
+    {"sources": ["win_registry"], "name": "^Mozilla Firefox\\b(?: [\\d.]+)?(?: \\(|$)", "publisher": "^Mozilla"},
+    {"sources": ["dpkg", "rpm"], "name": "^firefox$"}
+  ]},
+  {"id": "firefox-maintenance", "vendor": "Mozilla", "product": "Maintenance Service", "match": [
+    {"sources": ["win_registry"], "name": "^Mozilla Maintenance Service$", "publisher": "^Mozilla"}
+  ]},
+  {"id": "thunderbird", "vendor": "Mozilla", "product": "Thunderbird", "match": [
+    {"sources": ["win_registry"], "name": "^Mozilla Thunderbird\\b", "publisher": "^Mozilla"},
+    {"sources": ["dpkg", "rpm"], "name": "^thunderbird$"}
+  ]},
+  {"id": "edge", "vendor": "Microsoft", "product": "Edge", "match": [
+    {"sources": ["win_registry"], "name": "^Microsoft Edge$", "publisher": "^Microsoft"},
+    {"sources": ["dpkg", "rpm"], "name": "^microsoft-edge-(?:stable|beta|dev)$"}
+  ]},
+  {"id": "edge-webview2", "vendor": "Microsoft", "product": "Edge WebView2 Runtime", "match": [
+    {"sources": ["win_registry"], "name": "^Microsoft Edge WebView2 Runtime$", "publisher": "^Microsoft"}
+  ]},
+  {"id": "vscode", "vendor": "Microsoft", "product": "Visual Studio Code", "match": [
+    {"sources": ["win_registry"], "name": "^Microsoft Visual Studio Code\\b", "publisher": "^Microsoft"},
+    {"sources": ["dpkg", "rpm"], "name": "^code$"}
+  ]},
+  {"id": "visual-studio", "vendor": "Microsoft", "product": "Visual Studio $1 $2", "match": [
+    {"sources": ["win_registry"], "name": "^Visual Studio (Community|Professional|Enterprise|Build Tools) (20\\d\\d)$", "publisher": "^Microsoft"}
+  ]},
+  {"id": "vcredist", "vendor": "Microsoft", "product": "Visual C++ Redistributable", "match": [
+    {"sources": ["win_registry"], "name": "^Microsoft Visual C\\+\\+ 20\\d\\d(?:-20\\d\\d)? Redistributable\\b", "publisher": "^Microsoft"},
+    {"sources": ["win_registry"], "name": "^Microsoft Visual C\\+\\+ 20\\d\\d x(?:64|86) (?:Minimum|Additional) Runtime\\b", "publisher": "^Microsoft"}
+  ]},
+  {"id": "onedrive", "vendor": "Microsoft", "product": "OneDrive", "match": [
+    {"sources": ["win_registry"], "name": "^Microsoft OneDrive$", "publisher": "^Microsoft"}
+  ]},
+  {"id": "teams", "vendor": "Microsoft", "product": "Teams", "match": [
+    {"sources": ["win_registry"], "name": "^(?:Microsoft Teams(?: classic)?|Teams Machine-Wide Installer)$", "publisher": "^Microsoft"},
+    {"sources": ["dpkg", "rpm"], "name": "^teams(?:-for-linux)?$"}
+  ]},
+  {"id": "powershell", "vendor": "Microsoft", "product": "PowerShell", "match": [
+    {"sources": ["win_registry"], "name": "^PowerShell \\d+(?:\\.[\\d.]+)?-(?:x64|x86|arm64)$", "publisher": "^Microsoft"},
+    {"sources": ["dpkg", "rpm"], "name": "^powershell(?:-lts|-preview)?$"}
+  ]},
+  {"id": "powertoys", "vendor": "Microsoft", "product": "PowerToys", "match": [
+    {"sources": ["win_registry"], "name": "^PowerToys(?: \\(Preview\\))?(?: x64| arm64)?$", "publisher": "^Microsoft"}
+  ]},
+  {"id": "wsl", "vendor": "Microsoft", "product": "Windows Subsystem for Linux", "match": [
+    {"sources": ["win_registry"], "name": "^Windows Subsystem for Linux$", "publisher": "^Microsoft"}
+  ]},
+  {"id": "7zip", "vendor": "Igor Pavlov", "product": "7-Zip", "match": [
+    {"sources": ["win_registry"], "name": "^7-Zip\\b"},
+    {"sources": ["dpkg", "rpm"], "name": "^(?:p7zip(?:-full)?|7zip)$"}
+  ]},
+  {"id": "notepadpp", "vendor": "Notepad++", "product": "Notepad++", "match": [
+    {"sources": ["win_registry"], "name": "^Notepad\\+\\+(?: |$)"}
+  ]},
+  {"id": "vlc", "vendor": "VideoLAN", "product": "VLC media player", "match": [
+    {"sources": ["win_registry"], "name": "^VLC media player$"},
+    {"sources": ["dpkg", "rpm"], "name": "^vlc$"}
+  ]},
+  {"id": "acrobat-reader", "vendor": "Adobe", "product": "Acrobat Reader", "match": [
+    {"sources": ["win_registry"], "name": "^Adobe Acrobat Reader\\b", "publisher": "^Adobe"}
+  ]},
+  {"id": "acrobat", "vendor": "Adobe", "product": "Acrobat", "match": [
+    {"sources": ["win_registry"], "name": "^Adobe Acrobat\\b", "publisher": "^Adobe"}
+  ]},
+  {"id": "java-jre", "vendor": "Oracle", "product": "Java SE Runtime Environment", "match": [
+    {"sources": ["win_registry"], "name": "^Java(?:\\(TM\\))? \\d+ Update \\d+", "publisher": "^Oracle"}
+  ]},
+  {"id": "java-jdk", "vendor": "Oracle", "product": "Java SE Development Kit", "match": [
+    {"sources": ["win_registry"], "name": "^Java(?:\\(TM\\))? SE Development Kit\\b", "publisher": "^Oracle"}
+  ]},
+  {"id": "java-updater", "vendor": "Oracle", "product": "Java Auto Updater", "match": [
+    {"sources": ["win_registry"], "name": "^Java Auto Updater$", "publisher": "^Oracle"}
+  ]},
+  {"id": "temurin", "vendor": "Eclipse Adoptium", "product": "Temurin $1", "match": [
+    {"sources": ["win_registry"], "name": "^Eclipse Temurin (JDK|JRE)\\b"},
+    {"sources": ["dpkg", "rpm"], "name": "^temurin-\\d+-(jdk|jre)$"}
+  ]},
+  {"id": "python", "vendor": "Python Software Foundation", "product": "Python", "match": [
+    {"sources": ["win_registry"], "name": "^Python \\d+\\.\\d+(?:\\.\\d+)?(?: (?:Add to Path|Core Interpreter|Development Libraries|Documentation|Executables|Standard Library|Tcl/Tk Support|Test Suite|Utility Scripts|pip Bootstrap))? \\((?:64|32)-bit\\)$", "publisher": "^Python Software Foundation"}
+  ]},
+  {"id": "python-launcher", "vendor": "Python Software Foundation", "product": "Python Launcher", "match": [
+    {"sources": ["win_registry"], "name": "^Python Launcher$", "publisher": "^Python Software Foundation"}
+  ]},
+  {"id": "git", "vendor": "Git", "product": "Git", "match": [
+    {"sources": ["win_registry"], "name": "^Git(?: version [\\d.]+)?$", "publisher": "^The Git Development Community"},
+    {"sources": ["dpkg", "rpm"], "name": "^git$"}
+  ]},
+  {"id": "nodejs", "vendor": "OpenJS Foundation", "product": "Node.js", "match": [
+    {"sources": ["win_registry"], "name": "^Node\\.js$"},
+    {"sources": ["dpkg", "rpm"], "name": "^nodejs$"}
+  ]},
+  {"id": "go", "vendor": "Go", "product": "Go", "match": [
+    {"sources": ["win_registry"], "name": "^Go Programming Language\\b"},
+    {"sources": ["dpkg", "rpm"], "name": "^golang(?:-go|-\\d+\\.\\d+(?:-go)?)?$"}
+  ]},
+  {"id": "docker-desktop", "vendor": "Docker", "product": "Docker Desktop", "match": [
+    {"sources": ["win_registry"], "name": "^Docker Desktop$", "publisher": "^Docker"},
+    {"sources": ["dpkg", "rpm"], "name": "^docker-desktop$"}
+  ]},
+  {"id": "postgresql", "vendor": "PostgreSQL Global Development Group", "product": "PostgreSQL", "match": [
+    {"sources": ["win_registry"], "name": "^PostgreSQL \\d+(?:\\.\\d+)?$", "publisher": "^PostgreSQL"},
+    {"sources": ["dpkg"], "name": "^postgresql-\\d+$"},
+    {"sources": ["rpm"], "name": "^postgresql(?:\\d+)?-server$"}
+  ]},
+  {"id": "libreoffice", "vendor": "The Document Foundation", "product": "LibreOffice", "match": [
+    {"sources": ["win_registry"], "name": "^LibreOffice(?: [\\d.]+)?$", "publisher": "^The Document Foundation"},
+    {"sources": ["dpkg", "rpm"], "name": "^libreoffice(?:-core)?$"}
+  ]},
+  {"id": "openssl", "vendor": "OpenSSL", "product": "OpenSSL", "match": [
+    {"sources": ["dpkg"], "name": "^(?:openssl|libssl\\d[\\d.]*[a-z]?(?:t64)?)$"},
+    {"sources": ["rpm"], "name": "^openssl(?:-libs)?$"},
+    {"sources": ["win_registry"], "name": "^(?:Win64 |Win32 )?OpenSSL\\b"}
+  ]},
+  {"id": "linux-kernel", "vendor": "Linux", "product": "Linux kernel", "match": [
+    {"sources": ["dpkg"], "name": "^linux-image-.+$"},
+    {"sources": ["rpm"], "name": "^kernel(?:-core)?$"}
+  ]},
+  {"id": "teamviewer", "vendor": "TeamViewer", "product": "TeamViewer", "match": [
+    {"sources": ["win_registry"], "name": "^TeamViewer(?: \\d+| Host)?$", "publisher": "^TeamViewer"},
+    {"sources": ["dpkg", "rpm"], "name": "^teamviewer(?:-host)?$"}
+  ]},
+  {"id": "anydesk", "vendor": "AnyDesk", "product": "AnyDesk", "match": [
+    {"sources": ["win_registry"], "name": "^AnyDesk$", "publisher": "^AnyDesk"},
+    {"sources": ["dpkg", "rpm"], "name": "^anydesk$"}
+  ]},
+  {"id": "ultravnc", "vendor": "uvnc", "product": "UltraVNC", "match": [
+    {"sources": ["win_registry"], "name": "^UltraVNC\\b"}
+  ]},
+  {"id": "zoom", "vendor": "Zoom", "product": "Zoom Workplace", "match": [
+    {"sources": ["win_registry"], "name": "^Zoom(?: Workplace)?$", "publisher": "^Zoom Video Communications"},
+    {"sources": ["dpkg", "rpm"], "name": "^zoom$"}
+  ]},
+  {"id": "putty", "vendor": "Simon Tatham", "product": "PuTTY", "match": [
+    {"sources": ["win_registry"], "name": "^PuTTY release\\b"},
+    {"sources": ["dpkg", "rpm"], "name": "^putty$"}
+  ]},
+  {"id": "winrar", "vendor": "RARLAB", "product": "WinRAR", "match": [
+    {"sources": ["win_registry"], "name": "^WinRAR\\b"}
+  ]},
+  {"id": "winscp", "vendor": "Martin Prikryl", "product": "WinSCP", "match": [
+    {"sources": ["win_registry"], "name": "^WinSCP\\b"}
+  ]},
+  {"id": "filezilla", "vendor": "Tim Kosse", "product": "FileZilla", "match": [
+    {"sources": ["win_registry"], "name": "^FileZilla(?: Client)?\\b"},
+    {"sources": ["dpkg", "rpm"], "name": "^filezilla$"}
+  ]},
+  {"id": "wireshark", "vendor": "Wireshark Foundation", "product": "Wireshark", "match": [
+    {"sources": ["win_registry"], "name": "^Wireshark\\b"},
+    {"sources": ["dpkg", "rpm"], "name": "^wireshark(?:-qt)?$"}
+  ]},
+  {"id": "npcap", "vendor": "Nmap Project", "product": "Npcap", "match": [
+    {"sources": ["win_registry"], "name": "^Npcap\\b"}
+  ]},
+  {"id": "brave", "vendor": "Brave", "product": "Brave", "match": [
+    {"sources": ["win_registry"], "name": "^Brave$"},
+    {"sources": ["dpkg", "rpm"], "name": "^brave-browser$"}
+  ]},
+  {"id": "inkscape", "vendor": "Inkscape", "product": "Inkscape", "match": [
+    {"sources": ["win_registry"], "name": "^Inkscape\\b"},
+    {"sources": ["dpkg", "rpm"], "name": "^inkscape$"}
+  ]},
+  {"id": "blender", "vendor": "Blender Foundation", "product": "Blender", "match": [
+    {"sources": ["win_registry"], "name": "^Blender\\b"},
+    {"sources": ["dpkg", "rpm"], "name": "^blender$"}
+  ]},
+  {"id": "malwarebytes", "vendor": "Malwarebytes", "product": "Malwarebytes", "match": [
+    {"sources": ["win_registry"], "name": "^Malwarebytes(?: version [\\d.]+)?$", "publisher": "^Malwarebytes"}
+  ]},
+  {"id": "dbeaver", "vendor": "DBeaver", "product": "DBeaver", "match": [
+    {"sources": ["win_registry"], "name": "^DBeaver\\b"},
+    {"sources": ["dpkg", "rpm"], "name": "^dbeaver-ce$"}
+  ]},
+  {"id": "imagemagick", "vendor": "ImageMagick Studio", "product": "ImageMagick", "match": [
+    {"sources": ["win_registry"], "name": "^ImageMagick\\b"},
+    {"sources": ["dpkg", "rpm"], "name": "^imagemagick$"}
+  ]},
+  {"id": "pandoc", "vendor": "John MacFarlane", "product": "Pandoc", "match": [
+    {"sources": ["win_registry"], "name": "^Pandoc\\b"},
+    {"sources": ["dpkg", "rpm"], "name": "^pandoc$"}
+  ]},
+  {"id": "openssh", "vendor": "OpenBSD", "product": "OpenSSH", "match": [
+    {"sources": ["dpkg"], "name": "^openssh-(?:server|client)$"},
+    {"sources": ["rpm"], "name": "^openssh(?:-server|-clients)?$"}
+  ]}
+]

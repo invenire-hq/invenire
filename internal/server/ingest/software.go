@@ -3,10 +3,14 @@ package ingest
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
+	"github.com/athosbes/invenire/internal/server/normalize"
 	"github.com/athosbes/invenire/internal/server/store"
 	"github.com/athosbes/invenire/pkg/snapshot"
 )
@@ -28,9 +32,10 @@ func entriesOf(sw []snapshot.Software) []entry {
 	return out
 }
 
-// ensureRaws grava os nomes brutos que faltam e devolve o software_id de cada
-// um (nil se não identificado). Os ainda sem produto passam pelas regras.
-func (w *Worker) ensureRaws(ctx context.Context, q *store.Queries, tenantID uuid.UUID, entries []entry) (map[rawKey]*uuid.UUID, int, error) {
+// ensureRaws grava os nomes brutos que faltam e devolve o id e o produto de
+// cada um. Os ainda sem produto passam pelas regras; um nome mapeado agora
+// marca para reaplicação os outros ativos que já o tinham.
+func (w *Worker) ensureRaws(ctx context.Context, q *store.Queries, tenantID uuid.UUID, entries []entry) (map[rawKey]rawInfo, int, error) {
 	seen := make(map[rawKey]bool, len(entries))
 	var p store.InsertSoftwareRawsParams
 	for _, e := range entries {
@@ -42,7 +47,7 @@ func (w *Worker) ensureRaws(ctx context.Context, q *store.Queries, tenantID uuid
 		p.Names = append(p.Names, e.raw.name)
 		p.Vendors = append(p.Vendors, e.raw.vendor)
 	}
-	out := make(map[rawKey]*uuid.UUID, len(seen))
+	out := make(map[rawKey]rawInfo, len(seen))
 	if len(seen) == 0 {
 		return out, 0, nil
 	}
@@ -58,7 +63,7 @@ func (w *Worker) ensureRaws(ctx context.Context, q *store.Queries, tenantID uuid
 	mapped := 0
 	for _, r := range rows {
 		k := rawKey{r.Source, r.RawName, r.RawVendor}
-		out[k] = r.SoftwareID
+		out[k] = rawInfo{id: r.ID, software: r.SoftwareID}
 		if r.SoftwareID != nil || w.normalizer == nil {
 			continue
 		}
@@ -73,44 +78,79 @@ func (w *Worker) ensureRaws(ctx context.Context, q *store.Queries, tenantID uuid
 			}
 			normActor = &a.ID
 		}
-		swID, err := ensureProduct(ctx, q, m)
+		swID, err := mapRaw(ctx, q, r.ID, m, normActor)
 		if err != nil {
 			return nil, 0, err
 		}
-		conf, rule := m.Confidence, m.Rule
-		if err := q.MapSoftwareRaw(ctx, store.MapSoftwareRawParams{
-			ID: r.ID, SoftwareID: &swID, Confidence: &conf, MappedBy: normActor, MappedRule: &rule,
-		}); err != nil {
+		if err := appendChange(ctx, q, tenantID, "software_mapped", nil, normActor, mappingData(r.ID, swID, m)); err != nil {
 			return nil, 0, err
 		}
-		if err := appendChange(ctx, q, tenantID, "software_mapped", nil, normActor, map[string]any{
-			"software_raw_id": r.ID, "software_id": swID, "rule": rule, "confidence": conf,
-		}); err != nil {
-			return nil, 0, err
-		}
-		out[k] = &swID
+		out[k] = rawInfo{id: r.ID, software: &swID}
 		mapped++
 	}
 	return out, mapped, nil
 }
 
-func ensureProduct(ctx context.Context, q *store.Queries, m Match) (uuid.UUID, error) {
+// mapRaw liga o nome bruto ao produto da regra e marca para reaplicação os
+// ativos que têm o nome.
+func mapRaw(ctx context.Context, q *store.Queries, rawID uuid.UUID, m normalize.Match, by *uuid.UUID) (uuid.UUID, error) {
+	swID, err := ensureProduct(ctx, q, m.Vendor, m.Product)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	conf, rule := m.Confidence, m.Rule
+	if err := q.MapSoftwareRaw(ctx, store.MapSoftwareRawParams{
+		ID: rawID, SoftwareID: &swID, Confidence: &conf, MappedBy: by, MappedRule: &rule,
+	}); err != nil {
+		return uuid.Nil, err
+	}
+	_, err = q.MarkAssetsForRemap(ctx, rawID)
+	return swID, err
+}
+
+func mappingData(rawID, swID uuid.UUID, m normalize.Match) map[string]any {
+	return map[string]any{
+		"software_raw_id": rawID, "software_id": swID, "vendor": m.Vendor, "product": m.Product,
+		"rule": m.Rule, "confidence": m.Confidence,
+	}
+}
+
+// ensureProduct devolve o produto, criando fabricante e produto se faltarem.
+// Procura antes de criar: os Ensure* escrevem mesmo quando a linha existe.
+func ensureProduct(ctx context.Context, q *store.Queries, vendor, product string) (uuid.UUID, error) {
+	vendor, product = clean(vendor, maxVendor), clean(product, maxName)
+	if product == "" {
+		return uuid.Nil, errors.New("produto vazio")
+	}
+	var vp *string
+	if vendor != "" {
+		vp = &vendor
+	}
+	id, err := q.FindSoftware(ctx, store.FindSoftwareParams{Product: product, Vendor: vp})
+	if err == nil || !errors.Is(err, pgx.ErrNoRows) {
+		return id, err
+	}
 	var vendorID *uuid.UUID
-	if v := clean(m.Vendor, maxVendor); v != "" {
-		vd, err := q.EnsureVendor(ctx, v)
+	if vp != nil {
+		vd, err := q.EnsureVendor(ctx, vendor)
 		if err != nil {
 			return uuid.Nil, err
 		}
 		vendorID = &vd.ID
 	}
-	sw, err := q.EnsureSoftware(ctx, store.EnsureSoftwareParams{VendorID: vendorID, Product: clean(m.Product, maxName)})
+	sw, err := q.EnsureSoftware(ctx, store.EnsureSoftwareParams{VendorID: vendorID, Product: product})
 	return sw.ID, err
+}
+
+// EnsureProduct é ensureProduct para o mapeamento manual da API.
+func EnsureProduct(ctx context.Context, q *store.Queries, vendor, product string) (uuid.UUID, error) {
+	return ensureProduct(ctx, q, vendor, product)
 }
 
 // currentInstallations transforma as entradas identificadas em chaves de
 // installation (versão + caminho). Duas entradas que caem na mesma chave
-// são a mesma instalação.
-func currentInstallations(ctx context.Context, q *store.Queries, entries []entry, raws map[rawKey]*uuid.UUID) (map[instKey]entry, int, error) {
+// são a mesma instalação. Pacotes Linux levam o PURL na versão.
+func currentInstallations(ctx context.Context, q *store.Queries, entries []entry, raws map[rawKey]rawInfo, osID string) (map[instKey]entry, int, error) {
 	type svKey struct {
 		softwareID uuid.UUID
 		version    string
@@ -119,7 +159,7 @@ func currentInstallations(ctx context.Context, q *store.Queries, entries []entry
 	seen := map[svKey]bool{}
 	var p store.InsertSoftwareVersionsParams
 	for _, e := range entries {
-		sw := raws[e.raw]
+		sw := raws[e.raw].software
 		if sw == nil {
 			unmapped++
 			continue
@@ -129,6 +169,7 @@ func currentInstallations(ctx context.Context, q *store.Queries, entries []entry
 			seen[k] = true
 			p.SoftwareIds = append(p.SoftwareIds, k.softwareID)
 			p.Versions = append(p.Versions, k.version)
+			p.Purls = append(p.Purls, purl(e, osID))
 		}
 	}
 	current := map[instKey]entry{}
@@ -138,7 +179,13 @@ func currentInstallations(ctx context.Context, q *store.Queries, entries []entry
 	if err := q.InsertSoftwareVersions(ctx, p); err != nil {
 		return nil, 0, err
 	}
-	rows, err := q.GetSoftwareVersions(ctx, store.GetSoftwareVersionsParams(p))
+	// Um PURL já usado por outra versão (o pacote mudou de produto) faz a
+	// linha não entrar; de novo sem PURL, ela entra.
+	p.Purls = make([]string, len(p.Purls))
+	if err := q.InsertSoftwareVersions(ctx, p); err != nil {
+		return nil, 0, err
+	}
+	rows, err := q.GetSoftwareVersions(ctx, store.GetSoftwareVersionsParams{SoftwareIds: p.SoftwareIds, Versions: p.Versions})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -147,11 +194,54 @@ func currentInstallations(ctx context.Context, q *store.Queries, entries []entry
 		versions[svKey{r.SoftwareID, r.Version}] = r.ID
 	}
 	for _, e := range entries {
-		if sw := raws[e.raw]; sw != nil {
+		if sw := raws[e.raw].software; sw != nil {
 			current[instKey{versions[svKey{*sw, e.version}], e.path}] = e
 		}
 	}
 	return current, unmapped, nil
+}
+
+// purl monta o Package URL de um pacote Linux: pkg:deb/ubuntu/curl@8.5.0-2ubuntu10.
+// Vazio para outras fontes ou sem distribuição e versão.
+func purl(e entry, osID string) string {
+	var typ string
+	switch e.raw.source {
+	case snapshot.SourceDpkg:
+		typ = "deb"
+	case snapshot.SourceRpm:
+		typ = "rpm"
+	default:
+		return ""
+	}
+	osID = strings.ToLower(clean(osID, 64))
+	if osID == "" || e.version == "" {
+		return ""
+	}
+	version, qualifiers := e.version, ""
+	// No rpm a época vai como qualificador; no deb ela faz parte da versão.
+	if typ == "rpm" {
+		if epoch, rest, ok := strings.Cut(version, ":"); ok {
+			version, qualifiers = rest, "?epoch="+purlEscape(epoch)
+		}
+	}
+	return "pkg:" + typ + "/" + purlEscape(osID) + "/" + purlEscape(strings.ToLower(e.raw.name)) + "@" + purlEscape(version) + qualifiers
+}
+
+// purlEscape codifica tudo fora de [A-Za-z0-9._~-] (inclusive ':' e '+').
+func purlEscape(s string) string {
+	const hex = "0123456789ABCDEF"
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '~' || c == '-' {
+			b.WriteByte(c)
+		} else {
+			b.WriteByte('%')
+			b.WriteByte(hex[c>>4])
+			b.WriteByte(hex[c&15])
+		}
+	}
+	return b.String()
 }
 
 func softwareFailed(s *snapshot.Snapshot) bool {
@@ -164,7 +254,7 @@ func softwareFailed(s *snapshot.Snapshot) bool {
 }
 
 // updateAsset grava os atributos do snapshot no ativo e registra o que mudou.
-func updateAsset(ctx context.Context, q *store.Queries, a store.Asset, s *snapshot.Snapshot, collectedAt time.Time, change func(string, any) error) error {
+func updateAsset(ctx context.Context, q *store.Queries, a store.Asset, s *snapshot.Snapshot, collectedAt time.Time, change changeLogger) error {
 	p := store.UpdateAssetFromSnapshotParams{
 		ID:           a.ID,
 		Hostname:     cleanPtr(s.Host.Hostname, maxAttr),
