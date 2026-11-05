@@ -60,7 +60,11 @@ func PinMatches(der, pin []byte) bool {
 // PinnedTLS confia no servidor só se a cadeia que ele apresenta trouxer uma
 // CA com o SHA-256 do pin e o certificado do servidor for emitido por ela.
 // É o que permite o primeiro contato, antes de o agente ter a CA.
-func PinnedTLS(pin []byte) *tls.Config {
+//
+// host é o nome ou IP da URL do servidor. Vem explícito porque, com IP, o
+// Go não preenche ConnectionState.ServerName (IP não vai no SNI), e a
+// conferência do nome seria pulada.
+func PinnedTLS(pin []byte, host string) *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS13,
 		// A verificação padrão é trocada pela de VerifyConnection, que é mais
@@ -69,6 +73,9 @@ func PinnedTLS(pin []byte) *tls.Config {
 		VerifyConnection: func(cs tls.ConnectionState) error {
 			if len(cs.PeerCertificates) == 0 {
 				return errors.New("servidor sem certificado")
+			}
+			if host == "" {
+				return errors.New("nome do servidor vazio")
 			}
 			roots := x509.NewCertPool()
 			found := false
@@ -83,9 +90,13 @@ func PinnedTLS(pin []byte) *tls.Config {
 			}
 			_, err := cs.PeerCertificates[0].Verify(x509.VerifyOptions{
 				Roots:     roots,
-				DNSName:   cs.ServerName,
+				DNSName:   host,
 				KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 			})
+			var he x509.HostnameError
+			if errors.As(err, &he) {
+				return fmt.Errorf("%w; suba o servidor com %s em --hosts ou use na URL um dos nomes acima", err, host)
+			}
 			return err
 		},
 	}

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	mrand "math/rand/v2"
+	"net/url"
 	"time"
 
 	"github.com/athosbes/invenire/internal/agent/collect"
@@ -65,7 +66,11 @@ func Enroll(ctx context.Context, dir state.Dir, opts EnrollOptions) (state.Confi
 		return state.Config{}, err
 	}
 
-	client, err := transport.NewClient(opts.ServerURL, transport.PinnedTLS(opts.CAPin))
+	u, err := url.Parse(opts.ServerURL)
+	if err != nil {
+		return state.Config{}, fmt.Errorf("URL do servidor: %w", err)
+	}
+	client, err := transport.NewClient(opts.ServerURL, transport.PinnedTLS(opts.CAPin, u.Hostname()))
 	if err != nil {
 		return state.Config{}, err
 	}

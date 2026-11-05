@@ -17,18 +17,96 @@ A arquitetura e o modelo de dados estão no documento
 - [x] Regras de normalização (`internal/server/normalize`), lista de software não identificado e mapeamento manual pela API
 - [x] `invenire-agent service install | uninstall`: serviço do Windows (SCM, Event Log) e unit do systemd
 
-## Uso
+## Do zero à primeira máquina
+
+São três programas: o **PostgreSQL**, o **servidor** (`invenire-server`), que recebe e organiza os
+inventários, e o **agente** (`invenire-agent`), instalado em cada máquina. Os comandos abaixo são
+do PowerShell, na pasta do repositório; no Linux troque `bin\` por `bin/` e `$env:X="…"` por
+`export X="…"`.
+
+**1. Banco e binários** (uma vez)
+
+```powershell
+docker compose -f deploy/docker-compose.yml up -d --wait
+go build -o bin/ ./cmd/invenire-server ./cmd/invenire-agent
+```
+
+**2. Servidor** (deixe este terminal aberto)
+
+```powershell
+$env:INVENIRE_DATABASE_URL="postgres://invenire:invenire@localhost:5442/invenire?sslmode=disable"
+bin\invenire-server.exe serve --listen :8443 --data data --hosts localhost,127.0.0.1
+```
+
+`--hosts` lista os nomes e IPs pelos quais os agentes vão chamar o servidor. O endereço usado no
+`enroll` (passo 4) precisa estar nessa lista, senão o agente recusa a conexão com
+`certificate is valid for …, not …`. Para máquinas da rede, inclua o nome DNS e o IP do servidor:
+`--hosts localhost,invenire.prefeitura.local,10.0.0.5`. A lista vale a partir da próxima subida.
+
+**3. Organização e token de cadastro** (outro terminal, com a mesma `INVENIRE_DATABASE_URL`)
+
+```powershell
+bin\invenire-server.exe tenant create "Prefeitura"
+bin\invenire-server.exe token create --tenant "Prefeitura" --ttl 24h --description "lote 1"
+```
+
+O `token create` mostra duas coisas diferentes, e o `enroll` pede as duas:
+
+| | Parece com | Para que serve |
+|---|---|---|
+| **token** | `inv_9LYq…` | senha de uso único: autoriza **uma** máquina a se cadastrar. Depois de usado, ou vencido o `--ttl`, não vale mais |
+| **ca pin** | `sha256:a6c6…` (64 dígitos hex) | impressão digital do servidor: o agente só fala com o servidor cuja CA tem esse SHA-256. É o mesmo para todas as máquinas e não é segredo |
+
+Um token por máquina: para cadastrar dez, rode `token create` dez vezes.
+
+**4. Cadastrar a máquina** (PowerShell **como administrador**; no Linux, root)
+
+```powershell
+bin\invenire-agent.exe enroll --server https://localhost:8443 --token inv_COLE_O_TOKEN_INTEIRO --ca-pin sha256:COLE_O_PIN
+```
+
+Para o token não ficar no histórico do terminal, ele pode ir em `INVENIRE_ENROLL_TOKEN` em vez
+de `--token`.
+
+**5. Deixar rodando como serviço** (mesmo terminal de administrador)
+
+```powershell
+bin\invenire-agent.exe service install
+Get-Service invenire-agent
+```
+
+O serviço coleta na hora e depois a cada 4h (`--interval`). Para ver o que chegou, crie um
+usuário da API (passo 6) ou consulte o banco.
+
+**6. Usuário da API** (opcional)
+
+```powershell
+bin\invenire-server.exe actor create --tenant "Prefeitura" --name "athos" --scopes read,admin
+curl.exe -k -H "Authorization: Bearer inva_COLE_O_TOKEN" https://localhost:8443/v1/software/unmapped
+```
+
+### Quando dá errado
+
+| Mensagem | Causa | O que fazer |
+|---|---|---|
+| `certificate is valid for X, not Y` | o servidor subiu sem o nome Y em `--hosts` | suba o servidor de novo com Y em `--hosts` |
+| `pin da CA inválido` | o valor de `--ca-pin` não é o pin (talvez o token no lugar dele) | copie a linha `ca pin:` inteira, com `sha256:` |
+| `a CA do servidor não confere com o pin` | o pin é de outro servidor ou de outra pasta `data` | gere o token no mesmo servidor e `--data` |
+| `servidor respondeu 401: token de cadastro inválido` | token já gasto, vencido ou incompleto | `token create` de novo |
+| `rode como administrador` | terminal sem elevação | abra o PowerShell como administrador |
+| `o agente não está cadastrado` | `service install` antes do `enroll` | faça o passo 4 |
+
+## Agente
+
+Coleta sem servidor, para conferir o que o agente vê ou para redes isoladas:
 
 ```sh
-go build -o bin/ ./cmd/invenire-agent
 bin/invenire-agent collect --out snapshot.json
 ```
 
 No Linux, rode como root: `product_uuid` e `product_serial` só são legíveis por ele.
 
 ### Cadastro e envio
-
-Como administrador (Windows) ou root (Linux):
 
 ```sh
 invenire-agent enroll --server https://invenire.local:8443 --token inv_… --ca-pin sha256:…
@@ -87,7 +165,7 @@ go generate ./pkg/snapshot
 ```sh
 export INVENIRE_DATABASE_URL="postgres://invenire:invenire@localhost:5442/invenire?sslmode=disable"
 go build -o bin/ ./cmd/invenire-server
-bin/invenire-server serve --listen :8443 --data data --hosts invenire.local,10.0.0.5
+bin/invenire-server serve --listen :8443 --data data --hosts localhost,invenire.local,10.0.0.5
 bin/invenire-server tenant create "Prefeitura"
 bin/invenire-server token create --tenant "Prefeitura" --ttl 24h --description "lote 1"
 bin/invenire-server actor create --tenant "Prefeitura" --name "athos" --scopes read,admin
@@ -95,7 +173,8 @@ bin/invenire-server actor create --tenant "Prefeitura" --name "athos" --scopes r
 
 `serve` aplica as migrações e, na primeira vez, cria a CA interna em `data/ca/`. Guarde
 `data/ca/ca.key`: sem ela nenhum agente cadastrado consegue mais se autenticar. O certificado
-TLS do servidor é emitido pela mesma CA a cada subida, para os nomes de `--hosts`.
+TLS do servidor é emitido pela mesma CA a cada subida, para os nomes de `--hosts`: todo nome ou
+IP que os agentes usam na URL do `enroll` precisa estar ali.
 
 `token create` mostra o token de cadastro (uso único, só o SHA-256 fica no banco) e o pin
 SHA-256 da CA, que o agente usa para conferir o servidor no primeiro contato.
