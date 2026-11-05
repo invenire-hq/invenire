@@ -15,6 +15,7 @@ A arquitetura e o modelo de dados estão no documento
 - [x] Bytes originais de cada snapshot guardados em `snapshot.body`, com o hash conferido pelo próprio banco
 - [x] Ingestão com diff de instalações (`internal/server/ingest`)
 - [x] Regras de normalização (`internal/server/normalize`), lista de software não identificado e mapeamento manual pela API
+- [x] `invenire-agent service install | uninstall`: serviço do Windows (SCM, Event Log) e unit do systemd
 
 ## Uso
 
@@ -46,8 +47,34 @@ Administradores; no Linux, 0700.
 
 A fila guarda até 100 snapshots (`--max-queue`) com os bytes exatos que serão enviados; o nome
 de cada arquivo traz o SHA-256, conferido antes do envio. O que o servidor recusa de vez vai para
-`queue/rejected/` com o motivo. Se o certificado for revogado, `run` para com erro e a fila
-fica intacta.
+`queue/rejected/` com o motivo. Se o certificado for revogado, `run` para com o código de saída
+3 e a fila fica intacta.
+
+### Como serviço
+
+Depois do `enroll`, no mesmo terminal de administrador ou root:
+
+```sh
+invenire-agent service install                 # --interval, --state-dir, --max-queue, --bin
+invenire-agent service uninstall               # executável e estado ficam
+```
+
+`install` copia o executável para um lugar que só administradores alteram (`--bin`), registra o
+serviço `invenire-agent` rodando `run` com as opções dadas e o inicia. Rodar `install` de novo
+com um executável novo é a atualização: para o serviço, troca o executável e a configuração e
+o inicia de novo.
+
+| | Windows | Linux |
+|---|---|---|
+| Executável | `%ProgramFiles%\Invenire\invenire-agent.exe` | `/usr/local/bin/invenire-agent` |
+| Registro | serviço automático (início atrasado), conta SYSTEM | `/etc/systemd/system/invenire-agent.service`, root, habilitada |
+| Log | Visualizador de Eventos, Aplicativo, origem `invenire-agent` | `journalctl -u invenire-agent` |
+| Se o processo cair | reinicia em 1, 5 e 15 min | reinicia em 60 s |
+| Certificado revogado (saída 3) | para e não reinicia | para e não reinicia (`RestartPreventExitStatus`) |
+
+A unit roda como root, mas com o sistema protegido: `ProtectSystem=full`, `ProtectHome=read-only`,
+`NoNewPrivileges`, sem acesso a dispositivos, módulos ou tunables do kernel, e só sockets IP e
+Unix. A unit é gerada a partir de `cmd/invenire-agent/invenire-agent.service.tmpl`.
 
 Depois de mudar as structs de `pkg/snapshot`, regenere o schema:
 

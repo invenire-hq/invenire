@@ -1,0 +1,43 @@
+# Gerada por "invenire-agent service install". Para mudar, rode o install de novo.
+[Unit]
+Description=Invenire Agent: inventário desta máquina
+Documentation=https://github.com/athosbes/invenire
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart={{.ExecStart}}
+Restart=on-failure
+RestartSec=60
+# 2: argumentos inválidos. 3: o servidor recusou o certificado do agente.
+# Reiniciar não resolve nenhum dos dois; o 3 pede um novo enroll.
+RestartPreventExitStatus=2 3
+TimeoutStopSec=30
+
+# Roda como root: product_uuid e product_serial só são legíveis por ele.
+# O resto do sistema fica só para leitura, salvo /var (rpm -qa pode querer
+# escrever no banco do rpm) e o diretório de estado.
+ReadWritePaths={{.StateDir}}
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

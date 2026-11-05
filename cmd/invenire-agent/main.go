@@ -2,6 +2,7 @@
 //
 //	invenire-agent enroll --server https://invenire:8443 --token inv_… --ca-pin sha256:…
 //	invenire-agent run
+//	invenire-agent service install   (serviço do Windows ou unit do systemd)
 //	invenire-agent collect --out snapshot.json   (modo offline, sem servidor)
 package main
 
@@ -32,6 +33,7 @@ func usage() {
 comandos:
   enroll    cadastra o agente no servidor com um token de uso único
   run       coleta periodicamente e envia ao servidor, com fila local
+  service   install | uninstall: roda o run como serviço do sistema
   collect   coleta o inventário e grava o snapshot JSON (modo offline)
   version   mostra a versão
 
@@ -40,7 +42,16 @@ acessível só a administradores; rode enroll e run como administrador/root.
 `, state.DefaultDir())
 }
 
+// exitRevoked é o código de saída quando o servidor recusa o certificado:
+// o gerenciador de serviços não deve reiniciar o agente, porque só um novo
+// cadastro resolve.
+const exitRevoked = 3
+
 func main() {
+	// Iniciado pelo gerenciador de serviços do Windows: não há console.
+	if isService() {
+		os.Exit(serviceMain(os.Args[1:]))
+	}
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
@@ -55,7 +66,9 @@ func main() {
 	case "enroll":
 		err = runEnroll(ctx, os.Args[2:])
 	case "run":
-		err = runRun(ctx, os.Args[2:])
+		err = runRun(ctx, os.Args[2:], slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	case "service":
+		err = runService(ctx, os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println(version)
 	case "help", "-h", "--help":
@@ -66,6 +79,9 @@ func main() {
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "invenire-agent:", err)
+		if errors.Is(err, runner.ErrRevoked) {
+			os.Exit(exitRevoked)
+		}
 		os.Exit(1)
 	}
 }
@@ -133,7 +149,7 @@ func runEnroll(ctx context.Context, args []string) error {
 	return nil
 }
 
-func runRun(ctx context.Context, args []string) error {
+func runRun(ctx context.Context, args []string, log *slog.Logger) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	once := fs.Bool("once", false, "coleta, tenta enviar a fila uma vez e sai")
 	interval := fs.Duration("interval", 4*time.Hour, "intervalo entre coletas")
@@ -151,14 +167,18 @@ func runRun(ctx context.Context, args []string) error {
 	a := &runner.Agent{
 		Dir:      d,
 		Version:  version,
-		Log:      slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		Log:      log,
 		MaxQueue: *maxQueue,
 	}
 	if err := a.Open(); err != nil {
 		return err
 	}
 	if !*once {
-		return a.Run(ctx, *interval)
+		err := a.Run(ctx, *interval)
+		if ctx.Err() != nil {
+			return nil // parada pedida (Ctrl+C, systemctl stop, SCM)
+		}
+		return err
 	}
 
 	if _, err := a.Enqueue(ctx); err != nil {
