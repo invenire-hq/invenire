@@ -17,6 +17,7 @@ A arquitetura e o modelo de dados estão no documento
 - [x] Regras de normalização (`internal/server/normalize`), lista de software não identificado e mapeamento manual pela API
 - [x] `invenire-agent service install | uninstall`: serviço do Windows (SCM, Event Log) e unit do systemd
 - [x] CA independente por tenant (crachás dos agentes), chave cifrada com a chave-mestra; servidor conferido por pin ou certificado público; `invenire-agent set-server`
+- [x] Produtos e mapeamentos manuais por tenant (`tenant_software_map`), separados do catálogo comum das regras
 
 ## Do zero à primeira máquina
 
@@ -223,7 +224,8 @@ certificado público, não há pin.
 | `GET /v1/agent` | crachá de agente | diz de qual agente e ativo é o crachá; o `set-server` usa para conferir o servidor novo |
 | `POST /v1/snapshots` | crachá de agente não revogado, conferido contra a CA do tenant que o emitiu | recebe o snapshot (gzip opcional) com o SHA-256 no cabeçalho `Invenire-Snapshot-SHA256`; 202 se novo, 200 se repetido |
 | `GET /v1/software/unmapped` | token de API, escopo `read` | nomes sem produto nos ativos do tenant, dos mais comuns para os menos, com o palpite das regras (`?source=`, `?limit=`, `?cursor=`) |
-| `PUT /v1/software/raw/{id}` | token de API, escopo `admin` | mapeamento manual: `{"vendor": "…", "product": "…"}` |
+| `PUT /v1/software/raw/{id}` | token de API, escopo `admin` | mapeamento manual do tenant: `{"vendor": "…", "product": "…"}`; devolve `product_scope` (`catalog` ou `tenant`) |
+| `DELETE /v1/software/raw/{id}` | token de API, escopo `admin` | desfaz o mapeamento manual do tenant |
 | `GET /healthz` | nenhuma | 204 se o banco responde |
 
 Revogar um agente é preencher `agent.revoked_at`; a próxima requisição dele recebe 401. Revogar
@@ -282,11 +284,19 @@ pelo `POST /v1/snapshots`, porque o jsonb não o guarda; o agente já tira NUL n
 | Heurística do Windows | "Cisco Packet Tracer 8.2.2 64Bit" de "Cisco Systems, Inc." → Cisco Systems / Packet Tracer | 0,7 com fabricante, 0,5 sem |
 
 Só o que atinge `--auto-map-confidence` (padrão 0,9) é mapeado sem revisão; abaixo disso, o
-resultado aparece como `suggestion` na lista de não identificados. Mapeamento manual nunca é
-mudado por regra.
+resultado aparece como `suggestion` na lista de não identificados.
 
-Quando um nome é mapeado, por regra ou à mão, os ativos que o têm (`asset_software_raw`)
-ficam com `remap_pending`, e a ingestão recalcula as instalações deles a partir do último
+**Catálogo comum e produtos do tenant.** O que as regras produzem é o catálogo comum, igual
+para todos os tenants (`vendor` e `software` com `tenant_id` nulo; `software_raw.software_id`
+guarda só mapeamento de regra). O mapeamento manual fica em `tenant_software_map`: vale só para
+os ativos do tenant de quem mapeou e vence a regra, que nunca o muda. Se o produto ou o
+fabricante pedido já está no catálogo comum, ele é reaproveitado (`product_scope: "catalog"`);
+se não está, é criado só para o tenant (`product_scope: "tenant"`), e o nome de um sistema
+interno não aparece para os outros. `DELETE /v1/software/raw/{id}` desfaz o mapeamento manual
+do tenant: volta a valer a regra, se houver, ou o nome volta para a lista de não identificados.
+
+Quando um nome é mapeado, por regra ou à mão, os ativos que o têm (`asset_software_raw`; no
+manual, só os do tenant) ficam com `remap_pending`, e a ingestão recalcula as instalações deles a partir do último
 snapshot, sem esperar o próximo. Ao subir, o `serve` passa as regras de novo sobre todos os
 nomes que elas podem mudar: um catálogo novo vale para o que já foi ingerido, e uma regra
 retirada desfaz o que tinha mapeado.
