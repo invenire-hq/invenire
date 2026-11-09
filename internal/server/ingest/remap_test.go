@@ -46,7 +46,7 @@ func TestManualMappingRemaps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.q.MapSoftwareRaw(ctx, store.MapSoftwareRawParams{ID: un[0].ID, SoftwareID: &sw.ID}); err != nil {
+	if err := f.q.SetTenantMapping(ctx, store.SetTenantMappingParams{TenantID: f.asset.TenantID, SoftwareRawID: un[0].ID, SoftwareID: sw.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := f.q.MarkAssetsForRemap(ctx, un[0].ID); err != nil || n != 1 {

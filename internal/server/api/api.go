@@ -83,6 +83,7 @@ func (s *Server) Handler() http.Handler {
 	})))
 	mux.Handle("GET /v1/software/unmapped", s.userAuth(scopeRead, s.listUnmapped))
 	mux.Handle("PUT /v1/software/raw/{id}", s.userAuth(scopeAdmin, s.mapRaw))
+	mux.Handle("DELETE /v1/software/raw/{id}", s.userAuth(scopeAdmin, s.unmapRaw))
 	return mux
 }
 

@@ -4,13 +4,21 @@
 -- RETURNING devolver a linha que já estava lá.
 
 -- name: EnsureVendor :one
-INSERT INTO vendor (name) VALUES ($1)
-ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+-- tenant_id nulo = catálogo comum.
+INSERT INTO vendor (tenant_id, name) VALUES (sqlc.narg(tenant_id), sqlc.arg(name))
+ON CONFLICT (tenant_id, name) DO UPDATE SET name = EXCLUDED.name
 RETURNING *;
 
+-- name: FindVendor :one
+-- O fabricante do catálogo comum vence o do tenant com o mesmo nome.
+SELECT id FROM vendor
+WHERE name = sqlc.arg(name) AND (tenant_id IS NULL OR tenant_id = sqlc.narg(tenant_id))
+ORDER BY tenant_id NULLS FIRST
+LIMIT 1;
+
 -- name: EnsureSoftware :one
-INSERT INTO software (vendor_id, product) VALUES ($1, $2)
-ON CONFLICT (vendor_id, product) DO UPDATE SET product = EXCLUDED.product
+INSERT INTO software (tenant_id, vendor_id, product) VALUES (sqlc.narg(tenant_id), sqlc.narg(vendor_id), sqlc.arg(product))
+ON CONFLICT (tenant_id, vendor_id, product) DO UPDATE SET product = EXCLUDED.product
 RETURNING *;
 
 -- name: EnsureSoftwareVersion :one

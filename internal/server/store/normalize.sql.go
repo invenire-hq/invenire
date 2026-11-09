@@ -93,23 +93,51 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 	return id, err
 }
 
+const deleteTenantMapping = `-- name: DeleteTenantMapping :one
+DELETE FROM tenant_software_map WHERE tenant_id = $1 AND software_raw_id = $2
+RETURNING software_id
+`
+
+type DeleteTenantMappingParams struct {
+	TenantID      uuid.UUID
+	SoftwareRawID uuid.UUID
+}
+
+func (q *Queries) DeleteTenantMapping(ctx context.Context, arg DeleteTenantMappingParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteTenantMapping, arg.TenantID, arg.SoftwareRawID)
+	var software_id uuid.UUID
+	err := row.Scan(&software_id)
+	return software_id, err
+}
+
 const findSoftware = `-- name: FindSoftware :one
-SELECT s.id FROM software s
+SELECT s.id, s.tenant_id FROM software s
 LEFT JOIN vendor v ON v.id = s.vendor_id
 WHERE s.product = $1 AND v.name IS NOT DISTINCT FROM $2
+  AND (s.tenant_id IS NULL OR s.tenant_id = $3)
+ORDER BY s.tenant_id NULLS FIRST
+LIMIT 1
 `
 
 type FindSoftwareParams struct {
-	Product string
-	Vendor  *string
+	Product  string
+	Vendor   *string
+	TenantID *uuid.UUID
 }
 
-// Procura o produto sem criar, para não escrever quando nada mudou.
-func (q *Queries) FindSoftware(ctx context.Context, arg FindSoftwareParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, findSoftware, arg.Product, arg.Vendor)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
+type FindSoftwareRow struct {
+	ID       uuid.UUID
+	TenantID *uuid.UUID
+}
+
+// Procura o produto sem criar, para não escrever quando nada mudou: no
+// catálogo comum primeiro, depois nos produtos do tenant (tenant_id nulo =
+// só o catálogo comum).
+func (q *Queries) FindSoftware(ctx context.Context, arg FindSoftwareParams) (FindSoftwareRow, error) {
+	row := q.db.QueryRow(ctx, findSoftware, arg.Product, arg.Vendor, arg.TenantID)
+	var i FindSoftwareRow
+	err := row.Scan(&i.ID, &i.TenantID)
+	return i, err
 }
 
 const getActorByAPIToken = `-- name: GetActorByAPIToken :one
@@ -183,6 +211,42 @@ func (q *Queries) GetTenantActor(ctx context.Context, arg GetTenantActorParams) 
 	return i, err
 }
 
+const getTenantMappings = `-- name: GetTenantMappings :many
+SELECT software_raw_id, software_id FROM tenant_software_map
+WHERE tenant_id = $1 AND software_raw_id = ANY($2::uuid[])
+`
+
+type GetTenantMappingsParams struct {
+	TenantID uuid.UUID
+	RawIds   []uuid.UUID
+}
+
+type GetTenantMappingsRow struct {
+	SoftwareRawID uuid.UUID
+	SoftwareID    uuid.UUID
+}
+
+// O mapeamento manual do tenant para os nomes dados; vence o da regra.
+func (q *Queries) GetTenantMappings(ctx context.Context, arg GetTenantMappingsParams) ([]GetTenantMappingsRow, error) {
+	rows, err := q.db.Query(ctx, getTenantMappings, arg.TenantID, arg.RawIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetTenantMappingsRow
+	for rows.Next() {
+		var i GetTenantMappingsRow
+		if err := rows.Scan(&i.SoftwareRawID, &i.SoftwareID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const latestAppliedSnapshot = `-- name: LatestAppliedSnapshot :one
 SELECT id, collected_at, payload FROM snapshot
 WHERE asset_id = $1 AND processed_at IS NOT NULL AND ingest_error IS NULL
@@ -206,7 +270,7 @@ func (q *Queries) LatestAppliedSnapshot(ctx context.Context, assetID uuid.UUID) 
 
 const listRuleCandidates = `-- name: ListRuleCandidates :many
 SELECT id, source, raw_name, raw_vendor, software_id, mapped_rule FROM software_raw
-WHERE (software_id IS NULL OR mapped_rule IS NOT NULL) AND id > $1
+WHERE id > $1
 ORDER BY id
 LIMIT $2
 `
@@ -225,8 +289,8 @@ type ListRuleCandidatesRow struct {
 	MappedRule *string
 }
 
-// Nomes que as regras podem mudar: os sem produto e os mapeados por regra.
-// Mapeamento manual (mapped_rule nulo com produto) nunca é tocado por regra.
+// Nomes que as regras podem mudar: todos, já que o mapeamento global é só
+// de regra. O manual fica em tenant_software_map, que regra não toca.
 func (q *Queries) ListRuleCandidates(ctx context.Context, arg ListRuleCandidatesParams) ([]ListRuleCandidatesRow, error) {
 	rows, err := q.db.Query(ctx, listRuleCandidates, arg.ID, arg.Limit)
 	if err != nil {
@@ -261,6 +325,8 @@ WITH u AS (
   JOIN asset_software_raw ar ON ar.software_raw_id = r.id
   JOIN asset a ON a.id = ar.asset_id
   WHERE r.software_id IS NULL AND a.tenant_id = $4
+    AND NOT EXISTS (SELECT 1 FROM tenant_software_map m
+                    WHERE m.tenant_id = a.tenant_id AND m.software_raw_id = r.id)
     AND ($5::text IS NULL OR r.source = $5)
   GROUP BY r.id
 )
@@ -337,6 +403,25 @@ func (q *Queries) MarkAssetsForRemap(ctx context.Context, softwareRawID uuid.UUI
 	return result.RowsAffected(), nil
 }
 
+const markTenantAssetsForRemap = `-- name: MarkTenantAssetsForRemap :execrows
+UPDATE asset SET remap_pending = true
+WHERE tenant_id = $2
+  AND id IN (SELECT asset_id FROM asset_software_raw WHERE software_raw_id = $1)
+`
+
+type MarkTenantAssetsForRemapParams struct {
+	SoftwareRawID uuid.UUID
+	TenantID      uuid.UUID
+}
+
+func (q *Queries) MarkTenantAssetsForRemap(ctx context.Context, arg MarkTenantAssetsForRemapParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markTenantAssetsForRemap, arg.SoftwareRawID, arg.TenantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const pruneAssetRaws = `-- name: PruneAssetRaws :exec
 
 DELETE FROM asset_software_raw
@@ -361,7 +446,7 @@ JOIN asset a ON a.id = ar.asset_id
 WHERE ar.software_raw_id = $1
 `
 
-// Em quais tenants o nome bruto aparece, para o change_log de cada um.
+// Em quais tenants o nome bruto aparece.
 func (q *Queries) RawTenants(ctx context.Context, softwareRawID uuid.UUID) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, rawTenants, softwareRawID)
 	if err != nil {
@@ -380,6 +465,60 @@ func (q *Queries) RawTenants(ctx context.Context, softwareRawID uuid.UUID) ([]uu
 		return nil, err
 	}
 	return items, nil
+}
+
+const ruleTenants = `-- name: RuleTenants :many
+SELECT DISTINCT a.tenant_id FROM asset_software_raw ar
+JOIN asset a ON a.id = ar.asset_id
+WHERE ar.software_raw_id = $1
+  AND NOT EXISTS (SELECT 1 FROM tenant_software_map m
+                  WHERE m.tenant_id = a.tenant_id AND m.software_raw_id = ar.software_raw_id)
+`
+
+// Os tenants em que a regra de um nome vale: os que o têm e não o mapearam
+// à mão. É neles que uma mudança de regra vai para o change_log.
+func (q *Queries) RuleTenants(ctx context.Context, softwareRawID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, ruleTenants, softwareRawID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var tenant_id uuid.UUID
+		if err := rows.Scan(&tenant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, tenant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setTenantMapping = `-- name: SetTenantMapping :exec
+INSERT INTO tenant_software_map (tenant_id, software_raw_id, software_id, mapped_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (tenant_id, software_raw_id) DO UPDATE
+SET software_id = EXCLUDED.software_id, mapped_by = EXCLUDED.mapped_by, mapped_at = now()
+`
+
+type SetTenantMappingParams struct {
+	TenantID      uuid.UUID
+	SoftwareRawID uuid.UUID
+	SoftwareID    uuid.UUID
+	MappedBy      *uuid.UUID
+}
+
+func (q *Queries) SetTenantMapping(ctx context.Context, arg SetTenantMappingParams) error {
+	_, err := q.db.Exec(ctx, setTenantMapping,
+		arg.TenantID,
+		arg.SoftwareRawID,
+		arg.SoftwareID,
+		arg.MappedBy,
+	)
+	return err
 }
 
 const unmapSoftwareRaw = `-- name: UnmapSoftwareRaw :exec

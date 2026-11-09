@@ -33,8 +33,9 @@ func entriesOf(sw []snapshot.Software) []entry {
 }
 
 // ensureRaws grava os nomes brutos que faltam e devolve o id e o produto de
-// cada um. Os ainda sem produto passam pelas regras; um nome mapeado agora
-// marca para reaplicação os outros ativos que já o tinham.
+// cada um para o tenant: o mapeamento manual dele, se houver, senão o da
+// regra. Os ainda sem regra passam pelas regras; um nome mapeado agora marca
+// para reaplicação os outros ativos que já o tinham.
 func (w *Worker) ensureRaws(ctx context.Context, q *store.Queries, tenantID uuid.UUID, entries []entry) (map[rawKey]rawInfo, int, error) {
 	seen := make(map[rawKey]bool, len(entries))
 	var p store.InsertSoftwareRawsParams
@@ -88,13 +89,28 @@ func (w *Worker) ensureRaws(ctx context.Context, q *store.Queries, tenantID uuid
 		out[k] = rawInfo{id: r.ID, software: &swID}
 		mapped++
 	}
+
+	ids := make([]uuid.UUID, 0, len(rows))
+	byID := make(map[uuid.UUID]rawKey, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.ID)
+		byID[r.ID] = rawKey{r.Source, r.RawName, r.RawVendor}
+	}
+	manual, err := q.GetTenantMappings(ctx, store.GetTenantMappingsParams{TenantID: tenantID, RawIds: ids})
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, m := range manual {
+		k := byID[m.SoftwareRawID]
+		out[k] = rawInfo{id: m.SoftwareRawID, software: &m.SoftwareID}
+	}
 	return out, mapped, nil
 }
 
 // mapRaw liga o nome bruto ao produto da regra e marca para reaplicação os
 // ativos que têm o nome.
 func mapRaw(ctx context.Context, q *store.Queries, rawID uuid.UUID, m normalize.Match, by *uuid.UUID) (uuid.UUID, error) {
-	swID, err := ensureProduct(ctx, q, m.Vendor, m.Product)
+	swID, _, err := ensureProduct(ctx, q, nil, m.Vendor, m.Product)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -116,35 +132,45 @@ func mappingData(rawID, swID uuid.UUID, m normalize.Match) map[string]any {
 }
 
 // ensureProduct devolve o produto, criando fabricante e produto se faltarem.
-// Procura antes de criar: os Ensure* escrevem mesmo quando a linha existe.
-func ensureProduct(ctx context.Context, q *store.Queries, vendor, product string) (uuid.UUID, error) {
+// Com tenant nulo (regras), tudo fica no catálogo comum. Com tenant
+// (mapeamento manual), um produto ou fabricante que já está no catálogo
+// comum é reaproveitado, e o que faltar é criado só para o tenant: o nome de
+// um sistema interno não aparece para os outros. private diz se o produto
+// é do tenant. Procura antes de criar: os Ensure* escrevem mesmo quando a
+// linha existe.
+func ensureProduct(ctx context.Context, q *store.Queries, tenant *uuid.UUID, vendor, product string) (id uuid.UUID, private bool, err error) {
 	vendor, product = clean(vendor, maxVendor), clean(product, maxName)
 	if product == "" {
-		return uuid.Nil, errors.New("produto vazio")
+		return uuid.Nil, false, errors.New("produto vazio")
 	}
 	var vp *string
 	if vendor != "" {
 		vp = &vendor
 	}
-	id, err := q.FindSoftware(ctx, store.FindSoftwareParams{Product: product, Vendor: vp})
+	found, err := q.FindSoftware(ctx, store.FindSoftwareParams{Product: product, Vendor: vp, TenantID: tenant})
 	if err == nil || !errors.Is(err, pgx.ErrNoRows) {
-		return id, err
+		return found.ID, found.TenantID != nil, err
 	}
 	var vendorID *uuid.UUID
 	if vp != nil {
-		vd, err := q.EnsureVendor(ctx, vendor)
-		if err != nil {
-			return uuid.Nil, err
+		v, err := q.FindVendor(ctx, store.FindVendorParams{Name: vendor, TenantID: tenant})
+		if errors.Is(err, pgx.ErrNoRows) {
+			var vd store.Vendor
+			vd, err = q.EnsureVendor(ctx, store.EnsureVendorParams{TenantID: tenant, Name: vendor})
+			v = vd.ID
 		}
-		vendorID = &vd.ID
+		if err != nil {
+			return uuid.Nil, false, err
+		}
+		vendorID = &v
 	}
-	sw, err := q.EnsureSoftware(ctx, store.EnsureSoftwareParams{VendorID: vendorID, Product: product})
-	return sw.ID, err
+	sw, err := q.EnsureSoftware(ctx, store.EnsureSoftwareParams{TenantID: tenant, VendorID: vendorID, Product: product})
+	return sw.ID, tenant != nil, err
 }
 
 // EnsureProduct é ensureProduct para o mapeamento manual da API.
-func EnsureProduct(ctx context.Context, q *store.Queries, vendor, product string) (uuid.UUID, error) {
-	return ensureProduct(ctx, q, vendor, product)
+func EnsureProduct(ctx context.Context, q *store.Queries, tenant uuid.UUID, vendor, product string) (id uuid.UUID, private bool, err error) {
+	return ensureProduct(ctx, q, &tenant, vendor, product)
 }
 
 // currentInstallations transforma as entradas identificadas em chaves de

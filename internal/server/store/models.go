@@ -136,6 +136,7 @@ type Software struct {
 	Product    string
 	CpeVendor  *string
 	CpeProduct *string
+	TenantID   *uuid.UUID
 }
 
 type SoftwareRaw struct {
@@ -175,7 +176,16 @@ type TenantCa struct {
 	RevokedAt   *time.Time
 }
 
+type TenantSoftwareMap struct {
+	TenantID      uuid.UUID
+	SoftwareRawID uuid.UUID
+	SoftwareID    uuid.UUID
+	MappedBy      *uuid.UUID
+	MappedAt      time.Time
+}
+
 type Vendor struct {
-	ID   uuid.UUID
-	Name string
+	ID       uuid.UUID
+	Name     string
+	TenantID *uuid.UUID
 }

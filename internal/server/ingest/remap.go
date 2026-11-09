@@ -13,9 +13,8 @@ import (
 
 const remapPage = 500
 
-// RemapAll passa as regras atuais sobre todos os nomes brutos que elas podem
-// mudar: os sem produto e os mapeados por regra. Mapeamento manual não é
-// tocado. Cada nome que muda marca seus ativos para reaplicação, que o
+// RemapAll passa as regras atuais sobre todos os nomes brutos. O mapeamento
+// manual de cada tenant fica em tenant_software_map e não é tocado. Cada nome que muda marca seus ativos para reaplicação, que o
 // worker faz em seguida a partir do último snapshot de cada um.
 //
 // É o que torna uma regra nova retroativa: os snapshots são imutáveis, então
@@ -62,8 +61,8 @@ func (w *Worker) remapRaw(ctx context.Context, r store.ListRuleCandidatesRow) (b
 		if v := clean(m.Vendor, maxVendor); v != "" {
 			vp = &v
 		}
-		id, err := store.New(w.pool).FindSoftware(ctx, store.FindSoftwareParams{Product: clean(m.Product, maxName), Vendor: vp})
-		if err == nil && id == *r.SoftwareID {
+		found, err := store.New(w.pool).FindSoftware(ctx, store.FindSoftwareParams{Product: clean(m.Product, maxName), Vendor: vp})
+		if err == nil && found.ID == *r.SoftwareID {
 			return false, nil
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -77,12 +76,9 @@ func (w *Worker) remapRaw(ctx context.Context, r store.ListRuleCandidatesRow) (b
 	}
 	defer tx.Rollback(ctx)
 	q := store.New(tx)
-	cur, err := q.GetSoftwareRawForUpdate(ctx, r.ID)
-	if err != nil {
+	// Trava a linha: dois servidores reaplicando ao mesmo tempo não se cruzam.
+	if _, err := q.GetSoftwareRawForUpdate(ctx, r.ID); err != nil {
 		return false, err
-	}
-	if cur.SoftwareID != nil && cur.MappedRule == nil {
-		return false, nil // alguém mapeou à mão nesse meio-tempo
 	}
 
 	kind, data := "software_unmapped", map[string]any{"software_raw_id": r.ID, "previous_rule": deref(r.MappedRule)}
@@ -106,10 +102,11 @@ func (w *Worker) remapRaw(ctx context.Context, r store.ListRuleCandidatesRow) (b
 	return true, tx.Commit(ctx)
 }
 
-// logToTenants registra uma mudança de mapeamento, que é global, no
-// change_log de cada tenant em que o nome aparece, pelo ator "normalize".
+// logToTenants registra uma mudança de regra, que é global, no change_log
+// de cada tenant em que ela vale (tem o nome e não o mapeou à mão), pelo
+// ator "normalize".
 func logToTenants(ctx context.Context, q *store.Queries, rawID uuid.UUID, kind string, data any) error {
-	tenants, err := q.RawTenants(ctx, rawID)
+	tenants, err := q.RuleTenants(ctx, rawID)
 	if err != nil {
 		return err
 	}

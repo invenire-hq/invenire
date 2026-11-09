@@ -53,7 +53,17 @@ type MapResponse struct {
 	AsOf          int64     `json:"as_of"`
 	SoftwareRawID uuid.UUID `json:"software_raw_id"`
 	SoftwareID    uuid.UUID `json:"software_id"`
-	AssetsToApply int64     `json:"assets_to_apply"` // ativos cujas instalações serão recalculadas
+	// ProductScope diz de onde é o produto: "catalog" (catálogo comum,
+	// reaproveitado) ou "tenant" (criado agora ou antes, só deste tenant).
+	ProductScope  string `json:"product_scope"`
+	AssetsToApply int64  `json:"assets_to_apply"` // ativos cujas instalações serão recalculadas
+}
+
+// UnmapResponse é a resposta de DELETE /v1/software/raw/{id}.
+type UnmapResponse struct {
+	AsOf          int64     `json:"as_of"`
+	SoftwareRawID uuid.UUID `json:"software_raw_id"`
+	AssetsToApply int64     `json:"assets_to_apply"`
 }
 
 const (
@@ -143,6 +153,27 @@ const maxMapBody = 4 << 10
 // mapRaw: PUT /v1/software/raw/{id} {"vendor": "...", "product": "..."}
 // Mapeamento manual: vale para todos os ativos que têm o nome, as regras não
 // o mudam depois, e as instalações são recalculadas em seguida.
+// rawInTenant confere que o nome bruto aparece nos ativos do tenant: um nome
+// que o tenant não tem é tratado como inexistente.
+func rawInTenant(r *http.Request, q *store.Queries, rawID, tenant uuid.UUID) error {
+	if _, err := q.GetSoftwareRawForUpdate(r.Context(), rawID); errors.Is(err, pgx.ErrNoRows) {
+		return errorf(http.StatusNotFound, "nome bruto não encontrado")
+	} else if err != nil {
+		return err
+	}
+	tenants, err := q.RawTenants(r.Context(), rawID)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(tenants, tenant) {
+		return errorf(http.StatusNotFound, "nome bruto não encontrado")
+	}
+	return nil
+}
+
+// mapRaw é o mapeamento manual. Vale só para o tenant de quem mapeia e vence
+// a regra. Um produto que já está no catálogo comum é reaproveitado; um que
+// não está é criado só para o tenant.
 func (s *Server) mapRaw(w http.ResponseWriter, r *http.Request) {
 	actor := actorFrom(r.Context())
 	rawID, err := uuid.Parse(r.PathValue("id"))
@@ -162,53 +193,37 @@ func (s *Server) mapRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := MapResponse{SoftwareRawID: rawID}
+	resp := MapResponse{SoftwareRawID: rawID, ProductScope: "catalog"}
 	err = s.inTx(r.Context(), func(q *store.Queries) error {
-		if _, err := q.GetSoftwareRawForUpdate(r.Context(), rawID); errors.Is(err, pgx.ErrNoRows) {
-			return errorf(http.StatusNotFound, "nome bruto não encontrado")
-		} else if err != nil {
+		if err := rawInTenant(r, q, rawID, actor.TenantID); err != nil {
 			return err
 		}
-		// O mapeamento é global, mas só quem vê o nome nos próprios ativos
-		// pode mudá-lo.
-		tenants, err := q.RawTenants(r.Context(), rawID)
+		swID, private, err := ingest.EnsureProduct(r.Context(), q, actor.TenantID, req.Vendor, req.Product)
 		if err != nil {
 			return err
 		}
-		if !slices.Contains(tenants, actor.TenantID) {
-			return errorf(http.StatusNotFound, "nome bruto não encontrado")
+		if private {
+			resp.ProductScope = "tenant"
 		}
-		swID, err := ingest.EnsureProduct(r.Context(), q, req.Vendor, req.Product)
-		if err != nil {
-			return err
-		}
-		conf := float32(1)
-		if err := q.MapSoftwareRaw(r.Context(), store.MapSoftwareRawParams{
-			ID: rawID, SoftwareID: &swID, Confidence: &conf, MappedBy: &actor.ID,
+		if err := q.SetTenantMapping(r.Context(), store.SetTenantMappingParams{
+			TenantID: actor.TenantID, SoftwareRawID: rawID, SoftwareID: swID, MappedBy: &actor.ID,
 		}); err != nil {
 			return err
 		}
-		if resp.AssetsToApply, err = q.MarkAssetsForRemap(r.Context(), rawID); err != nil {
+		if resp.AssetsToApply, err = q.MarkTenantAssetsForRemap(r.Context(), store.MarkTenantAssetsForRemapParams{
+			SoftwareRawID: rawID, TenantID: actor.TenantID,
+		}); err != nil {
 			return err
 		}
 		resp.SoftwareID = swID
 		data, _ := json.Marshal(map[string]any{
-			"software_raw_id": rawID, "software_id": swID, "vendor": req.Vendor, "product": req.Product, "manual": true,
+			"software_raw_id": rawID, "software_id": swID, "vendor": req.Vendor, "product": req.Product,
+			"manual": true, "product_scope": resp.ProductScope,
 		})
-		for _, t := range tenants {
-			var by *uuid.UUID
-			if t == actor.TenantID {
-				by = &actor.ID
-			}
-			id, err := q.AppendChange(r.Context(), store.AppendChangeParams{TenantID: t, Kind: "software_mapped", ActorID: by, Data: data})
-			if err != nil {
-				return err
-			}
-			if t == actor.TenantID {
-				resp.AsOf = id
-			}
-		}
-		return nil
+		resp.AsOf, err = q.AppendChange(r.Context(), store.AppendChangeParams{
+			TenantID: actor.TenantID, Kind: "software_mapped", ActorID: &actor.ID, Data: data,
+		})
+		return err
 	})
 	if err != nil {
 		s.fail(w, r, err)
@@ -218,5 +233,47 @@ func (s *Server) mapRaw(w http.ResponseWriter, r *http.Request) {
 		s.Wake()
 	}
 	s.log.InfoContext(r.Context(), "software mapeado à mão", "actor", actor.Name, "software_raw_id", rawID, "software_id", resp.SoftwareID)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// unmapRaw desfaz o mapeamento manual do tenant: volta a valer a regra, se
+// houver, ou o nome volta para a lista de não identificados.
+func (s *Server) unmapRaw(w http.ResponseWriter, r *http.Request) {
+	actor := actorFrom(r.Context())
+	rawID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "nome bruto não encontrado")
+		return
+	}
+	resp := UnmapResponse{SoftwareRawID: rawID}
+	err = s.inTx(r.Context(), func(q *store.Queries) error {
+		if err := rawInTenant(r, q, rawID, actor.TenantID); err != nil {
+			return err
+		}
+		prev, err := q.DeleteTenantMapping(r.Context(), store.DeleteTenantMappingParams{TenantID: actor.TenantID, SoftwareRawID: rawID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errorf(http.StatusNotFound, "o tenant não mapeou este nome à mão")
+		}
+		if err != nil {
+			return err
+		}
+		if resp.AssetsToApply, err = q.MarkTenantAssetsForRemap(r.Context(), store.MarkTenantAssetsForRemapParams{
+			SoftwareRawID: rawID, TenantID: actor.TenantID,
+		}); err != nil {
+			return err
+		}
+		data, _ := json.Marshal(map[string]any{"software_raw_id": rawID, "previous_software_id": prev, "manual": true})
+		resp.AsOf, err = q.AppendChange(r.Context(), store.AppendChangeParams{
+			TenantID: actor.TenantID, Kind: "software_unmapped", ActorID: &actor.ID, Data: data,
+		})
+		return err
+	})
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if s.Wake != nil {
+		s.Wake()
+	}
 	writeJSON(w, http.StatusOK, resp)
 }

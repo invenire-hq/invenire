@@ -28,18 +28,19 @@ func (q *Queries) CloseInstallations(ctx context.Context, arg CloseInstallations
 }
 
 const ensureSoftware = `-- name: EnsureSoftware :one
-INSERT INTO software (vendor_id, product) VALUES ($1, $2)
-ON CONFLICT (vendor_id, product) DO UPDATE SET product = EXCLUDED.product
-RETURNING id, vendor_id, product, cpe_vendor, cpe_product
+INSERT INTO software (tenant_id, vendor_id, product) VALUES ($1, $2, $3)
+ON CONFLICT (tenant_id, vendor_id, product) DO UPDATE SET product = EXCLUDED.product
+RETURNING id, vendor_id, product, cpe_vendor, cpe_product, tenant_id
 `
 
 type EnsureSoftwareParams struct {
+	TenantID *uuid.UUID
 	VendorID *uuid.UUID
 	Product  string
 }
 
 func (q *Queries) EnsureSoftware(ctx context.Context, arg EnsureSoftwareParams) (Software, error) {
-	row := q.db.QueryRow(ctx, ensureSoftware, arg.VendorID, arg.Product)
+	row := q.db.QueryRow(ctx, ensureSoftware, arg.TenantID, arg.VendorID, arg.Product)
 	var i Software
 	err := row.Scan(
 		&i.ID,
@@ -47,6 +48,7 @@ func (q *Queries) EnsureSoftware(ctx context.Context, arg EnsureSoftwareParams) 
 		&i.Product,
 		&i.CpeVendor,
 		&i.CpeProduct,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -108,19 +110,25 @@ func (q *Queries) EnsureSoftwareVersion(ctx context.Context, arg EnsureSoftwareV
 
 const ensureVendor = `-- name: EnsureVendor :one
 
-INSERT INTO vendor (name) VALUES ($1)
-ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-RETURNING id, name
+INSERT INTO vendor (tenant_id, name) VALUES ($1, $2)
+ON CONFLICT (tenant_id, name) DO UPDATE SET name = EXCLUDED.name
+RETURNING id, name, tenant_id
 `
+
+type EnsureVendorParams struct {
+	TenantID *uuid.UUID
+	Name     string
+}
 
 // Identidade de software e instalações.
 //
 // Os "Ensure" são get-or-create: o DO UPDATE sem efeito existe só para o
 // RETURNING devolver a linha que já estava lá.
-func (q *Queries) EnsureVendor(ctx context.Context, name string) (Vendor, error) {
-	row := q.db.QueryRow(ctx, ensureVendor, name)
+// tenant_id nulo = catálogo comum.
+func (q *Queries) EnsureVendor(ctx context.Context, arg EnsureVendorParams) (Vendor, error) {
+	row := q.db.QueryRow(ctx, ensureVendor, arg.TenantID, arg.Name)
 	var i Vendor
-	err := row.Scan(&i.ID, &i.Name)
+	err := row.Scan(&i.ID, &i.Name, &i.TenantID)
 	return i, err
 }
 
@@ -169,6 +177,26 @@ func (q *Queries) FindSoftwareVersionInstallations(ctx context.Context, arg Find
 		return nil, err
 	}
 	return items, nil
+}
+
+const findVendor = `-- name: FindVendor :one
+SELECT id FROM vendor
+WHERE name = $1 AND (tenant_id IS NULL OR tenant_id = $2)
+ORDER BY tenant_id NULLS FIRST
+LIMIT 1
+`
+
+type FindVendorParams struct {
+	Name     string
+	TenantID *uuid.UUID
+}
+
+// O fabricante do catálogo comum vence o do tenant com o mesmo nome.
+func (q *Queries) FindVendor(ctx context.Context, arg FindVendorParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, findVendor, arg.Name, arg.TenantID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const listOpenInstallations = `-- name: ListOpenInstallations :many

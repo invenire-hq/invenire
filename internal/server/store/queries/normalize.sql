@@ -15,6 +15,26 @@ ON CONFLICT DO NOTHING;
 UPDATE asset SET remap_pending = true
 WHERE id IN (SELECT asset_id FROM asset_software_raw WHERE software_raw_id = $1);
 
+-- name: MarkTenantAssetsForRemap :execrows
+UPDATE asset SET remap_pending = true
+WHERE tenant_id = $2
+  AND id IN (SELECT asset_id FROM asset_software_raw WHERE software_raw_id = $1);
+
+-- name: GetTenantMappings :many
+-- O mapeamento manual do tenant para os nomes dados; vence o da regra.
+SELECT software_raw_id, software_id FROM tenant_software_map
+WHERE tenant_id = $1 AND software_raw_id = ANY(sqlc.arg(raw_ids)::uuid[]);
+
+-- name: SetTenantMapping :exec
+INSERT INTO tenant_software_map (tenant_id, software_raw_id, software_id, mapped_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (tenant_id, software_raw_id) DO UPDATE
+SET software_id = EXCLUDED.software_id, mapped_by = EXCLUDED.mapped_by, mapped_at = now();
+
+-- name: DeleteTenantMapping :one
+DELETE FROM tenant_software_map WHERE tenant_id = $1 AND software_raw_id = $2
+RETURNING software_id;
+
 -- name: ClearRemap :exec
 UPDATE asset SET remap_pending = false WHERE id = $1;
 
@@ -32,10 +52,15 @@ ORDER BY collected_at DESC, received_at DESC
 LIMIT 1;
 
 -- name: FindSoftware :one
--- Procura o produto sem criar, para não escrever quando nada mudou.
-SELECT s.id FROM software s
+-- Procura o produto sem criar, para não escrever quando nada mudou: no
+-- catálogo comum primeiro, depois nos produtos do tenant (tenant_id nulo =
+-- só o catálogo comum).
+SELECT s.id, s.tenant_id FROM software s
 LEFT JOIN vendor v ON v.id = s.vendor_id
-WHERE s.product = sqlc.arg(product) AND v.name IS NOT DISTINCT FROM sqlc.narg(vendor);
+WHERE s.product = sqlc.arg(product) AND v.name IS NOT DISTINCT FROM sqlc.narg(vendor)
+  AND (s.tenant_id IS NULL OR s.tenant_id = sqlc.narg(tenant_id))
+ORDER BY s.tenant_id NULLS FIRST
+LIMIT 1;
 
 -- name: UnmapSoftwareRaw :exec
 UPDATE software_raw SET software_id = NULL, confidence = NULL, mapped_by = NULL,
@@ -43,10 +68,10 @@ UPDATE software_raw SET software_id = NULL, confidence = NULL, mapped_by = NULL,
 WHERE id = $1;
 
 -- name: ListRuleCandidates :many
--- Nomes que as regras podem mudar: os sem produto e os mapeados por regra.
--- Mapeamento manual (mapped_rule nulo com produto) nunca é tocado por regra.
+-- Nomes que as regras podem mudar: todos, já que o mapeamento global é só
+-- de regra. O manual fica em tenant_software_map, que regra não toca.
 SELECT id, source, raw_name, raw_vendor, software_id, mapped_rule FROM software_raw
-WHERE (software_id IS NULL OR mapped_rule IS NOT NULL) AND id > $1
+WHERE id > $1
 ORDER BY id
 LIMIT $2;
 
@@ -54,10 +79,19 @@ LIMIT $2;
 SELECT * FROM software_raw WHERE id = $1 FOR UPDATE;
 
 -- name: RawTenants :many
--- Em quais tenants o nome bruto aparece, para o change_log de cada um.
+-- Em quais tenants o nome bruto aparece.
 SELECT DISTINCT a.tenant_id FROM asset_software_raw ar
 JOIN asset a ON a.id = ar.asset_id
 WHERE ar.software_raw_id = $1;
+
+-- name: RuleTenants :many
+-- Os tenants em que a regra de um nome vale: os que o têm e não o mapearam
+-- à mão. É neles que uma mudança de regra vai para o change_log.
+SELECT DISTINCT a.tenant_id FROM asset_software_raw ar
+JOIN asset a ON a.id = ar.asset_id
+WHERE ar.software_raw_id = $1
+  AND NOT EXISTS (SELECT 1 FROM tenant_software_map m
+                  WHERE m.tenant_id = a.tenant_id AND m.software_raw_id = ar.software_raw_id);
 
 -- name: ListUnmappedForTenant :many
 -- A lista de software não identificado de um tenant, dos nomes em mais
@@ -68,6 +102,8 @@ WITH u AS (
   JOIN asset_software_raw ar ON ar.software_raw_id = r.id
   JOIN asset a ON a.id = ar.asset_id
   WHERE r.software_id IS NULL AND a.tenant_id = sqlc.arg(tenant_id)
+    AND NOT EXISTS (SELECT 1 FROM tenant_software_map m
+                    WHERE m.tenant_id = a.tenant_id AND m.software_raw_id = r.id)
     AND (sqlc.narg(source)::text IS NULL OR r.source = sqlc.narg(source))
   GROUP BY r.id
 )

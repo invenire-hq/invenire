@@ -170,7 +170,7 @@ func TestIngestDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.q.MapSoftwareRaw(ctx, store.MapSoftwareRawParams{ID: npID, SoftwareID: &sw.ID}); err != nil {
+	if err := f.q.SetTenantMapping(ctx, store.SetTenantMappingParams{TenantID: f.asset.TenantID, SoftwareRawID: npID, SoftwareID: sw.ID}); err != nil {
 		t.Fatal(err)
 	}
 	f.put(t, 4, []snapshot.Software{chrome("121.0"), notepad})

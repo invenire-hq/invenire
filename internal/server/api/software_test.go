@@ -7,8 +7,11 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/athosbes/invenire/internal/server/api"
 	"github.com/athosbes/invenire/internal/server/ingest"
@@ -161,5 +164,135 @@ func TestUnmappedAndManualMapping(t *testing.T) {
 	// Mapeamento manual não é desfeito pelas regras.
 	if n, err := worker.RemapAll(ctx); err != nil || n != 0 {
 		t.Fatalf("RemapAll mexeu em mapeamento manual: %d %v", n, err)
+	}
+}
+
+// O mapeamento manual e os produtos criados à mão são de um tenant só.
+func TestMappingIsPerTenant(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	rules, err := normalize.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := ingest.New(e.pool, slog.New(slog.NewTextHandler(io.Discard, nil)), rules)
+	other, err := e.q.CreateTenant(ctx, "outro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTok, _, err := api.NewEnrollmentToken(ctx, e.q, other.ID, "", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	software := []snapshot.Software{
+		{Source: "win_registry", Name: "Google Chrome", Publisher: "Google LLC", Version: "130.0"},
+		{Source: "win_registry", Name: "Sistema Interno 2.1", Version: "2.1"},
+	}
+	send := func(token string, host snapshot.Host) uuid.UUID {
+		_, enrolled, cert := e.enroll(token, host)
+		s := newSnapshot(host, "")
+		s.AgentID = enrolled.AgentID.String()
+		s.Software = software
+		body, sum, _ := snapshot.Marshal(s)
+		if status, _, msg := e.send(e.client(cert), body, sum); status != http.StatusAccepted {
+			t.Fatalf("envio: %d %s", status, msg)
+		}
+		return enrolled.AssetID
+	}
+	assetA := send(e.token(), testHost)
+	assetB := send(otherTok, snapshot.Host{MachineID: "maquina-do-outro"})
+	if _, err := worker.Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	installed := func(asset uuid.UUID) string {
+		rows, err := e.q.ListInstallationsWithSoftware(ctx, asset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, r := range rows {
+			if r.RemovedAt == nil {
+				out = append(out, r.Product)
+			}
+		}
+		return strings.Join(out, ",")
+	}
+	adminA, adminB := e.user(e.tenant, "admin-a", "admin"), e.user(other, "admin-b", "admin")
+	rawID := func(token, name string) string {
+		var list api.UnmappedList
+		e.call("GET", "/v1/software/unmapped", token, nil, &list)
+		for _, it := range list.Items {
+			if it.Collected.Name == name {
+				return it.ID.String()
+			}
+		}
+		return ""
+	}
+	internal := rawID(adminA, "Sistema Interno 2.1")
+	if internal == "" || rawID(adminB, "Sistema Interno 2.1") != internal {
+		t.Fatal("o nome devia estar na lista dos dois tenants")
+	}
+
+	// A mapeia o sistema interno para um produto que não está no catálogo:
+	// ele fica só de A, e B continua sem produto para o nome.
+	var mA api.MapResponse
+	if status := e.call("PUT", "/v1/software/raw/"+internal, adminA, api.MapRequest{Vendor: "Prefeitura", Product: "Protocolo"}, &mA); status != http.StatusOK || mA.ProductScope != "tenant" || mA.AssetsToApply != 1 {
+		t.Fatalf("mapear em A: %d %+v", status, mA)
+	}
+	if _, err := worker.Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := installed(assetA); got != "Chrome,Protocolo" {
+		t.Fatalf("A: %s", got)
+	}
+	if got := installed(assetB); got != "Chrome" {
+		t.Fatalf("o mapeamento de A vazou para B: %s", got)
+	}
+	if rawID(adminB, "Sistema Interno 2.1") == "" || rawID(adminA, "Sistema Interno 2.1") != "" {
+		t.Fatal("lista de não identificados por tenant")
+	}
+
+	// B usa o mesmo nome de produto: ganha o seu, não o de A.
+	var mB api.MapResponse
+	e.call("PUT", "/v1/software/raw/"+internal, adminB, api.MapRequest{Vendor: "Prefeitura", Product: "Protocolo"}, &mB)
+	if mB.ProductScope != "tenant" || mB.SoftwareID == mA.SoftwareID {
+		t.Fatalf("B reaproveitou o produto privado de A: %+v %+v", mB, mA)
+	}
+
+	// Produto do catálogo é reaproveitado, não duplicado.
+	var cat api.MapResponse
+	e.call("PUT", "/v1/software/raw/"+internal, adminB, api.MapRequest{Vendor: "Google", Product: "Chrome"}, &cat)
+	if cat.ProductScope != "catalog" {
+		t.Fatalf("produto do catálogo: %+v", cat)
+	}
+
+	// O manual vence a regra e sobrevive ao RemapAll; DELETE devolve a regra.
+	raw, err := e.q.GetSoftwareRaws(ctx, store.GetSoftwareRawsParams{Sources: []string{"win_registry"}, Names: []string{"Google Chrome"}, Vendors: []string{"Google LLC"}})
+	if err != nil || len(raw) != 1 {
+		t.Fatalf("nome do Chrome: %v %v", raw, err)
+	}
+	chromeRaw := raw[0].ID.String()
+	e.call("PUT", "/v1/software/raw/"+chromeRaw, adminB, api.MapRequest{Vendor: "Outro", Product: "Navegador"}, nil)
+	if n, err := worker.RemapAll(ctx); err != nil || n != 0 {
+		t.Fatalf("RemapAll: %d %v", n, err)
+	}
+	if _, err := worker.Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if a, b := installed(assetA), installed(assetB); a != "Chrome,Protocolo" || b != "Chrome,Navegador" {
+		t.Fatalf("depois do manual de B: A=%s B=%s", a, b)
+	}
+	if status := e.call("DELETE", "/v1/software/raw/"+chromeRaw, adminA, nil, nil); status != http.StatusNotFound {
+		t.Fatalf("A desfez um mapeamento que não fez: %d", status)
+	}
+	if status := e.call("DELETE", "/v1/software/raw/"+chromeRaw, adminB, nil, nil); status != http.StatusOK {
+		t.Fatalf("desfazer: %d", status)
+	}
+	if _, err := worker.Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := installed(assetB); got != "Chrome,Chrome" {
+		t.Fatalf("B depois de desfazer: %s", got)
 	}
 }

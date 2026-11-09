@@ -102,7 +102,7 @@ func TestInventoryFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	vendor, err := q.EnsureVendor(ctx, "Google")
+	vendor, err := q.EnsureVendor(ctx, store.EnsureVendorParams{Name: "Google"})
 	if err != nil {
 		t.Fatal(err)
 	}
