@@ -1,9 +1,13 @@
-// Package pki é a CA interna do Invenire: emite os certificados cliente dos
-// agentes (mTLS) e o certificado TLS do próprio servidor.
+// Package pki tem as CAs do Invenire.
 //
-// A chave da CA fica em disco, no diretório de dados do servidor. Revogar um
-// agente não passa pela CA: basta preencher agent.revoked_at, que o servidor
-// consulta a cada requisição.
+// A CA da instalação fica em disco, no diretório de dados do servidor, e
+// assina o certificado TLS do servidor (quando ele não usa um certificado
+// público). Cada tenant tem a sua própria CA, independente, que assina os
+// crachás (certificados cliente) dos agentes dele; a chave dela fica no banco,
+// cifrada com a chave-mestra (tenant.go).
+//
+// Revogar um agente não passa pela CA: basta preencher agent.revoked_at, que
+// o servidor consulta a cada requisição.
 package pki
 
 import (
@@ -125,11 +129,31 @@ func parse(certPEM, keyPEM []byte) (*CA, error) {
 	if err != nil {
 		return nil, err
 	}
+	return fromParts(cert, k)
+}
+
+func fromParts(cert *x509.Certificate, k any) (*CA, error) {
 	key, ok := k.(crypto.Signer)
 	if !ok || !cert.IsCA {
 		return nil, errors.New("pki: chave ou certificado da CA inválido")
 	}
-	return &CA{Cert: cert, key: key, pem: certPEM}, nil
+	return &CA{Cert: cert, key: key, pem: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})}, nil
+}
+
+// Load abre a CA em dir; devolve nil, sem erro, se ela não existir.
+func Load(dir string) (*CA, error) {
+	certPEM, err := os.ReadFile(filepath.Join(dir, caCertFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	keyPEM, err := os.ReadFile(filepath.Join(dir, caKeyFile))
+	if err != nil {
+		return nil, err
+	}
+	return parse(certPEM, keyPEM)
 }
 
 // PEM devolve o certificado da CA, que o agente guarda para validar o servidor.

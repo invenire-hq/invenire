@@ -28,8 +28,8 @@ SELECT * FROM asset WHERE id = $1;
 
 -- name: CreateAgent :one
 -- O id vem de quem chama: ele vai no certificado antes da linha existir.
-INSERT INTO agent (id, asset_id, cert_fingerprint, agent_version)
-VALUES ($1, $2, $3, $4)
+INSERT INTO agent (id, asset_id, cert_fingerprint, agent_version, tenant_ca_id)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetActiveAgentByCert :one

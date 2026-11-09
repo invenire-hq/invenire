@@ -102,10 +102,17 @@ func PinnedTLS(pin []byte, host string) *tls.Config {
 	}
 }
 
+// SystemTLS confia nas CAs do sistema (ou em roots, nos testes): para
+// servidores com certificado público.
+func SystemTLS(roots *x509.CertPool) *tls.Config {
+	return &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots}
+}
+
 // Client é o cliente HTTP do agente.
 type Client struct {
-	base string
-	hc   *http.Client
+	base  string
+	hc    *http.Client
+	onTLS func(*tls.ConnectionState)
 }
 
 // NewClient valida a URL do servidor e monta o cliente com o TLS dado.
@@ -130,8 +137,19 @@ func (c *Client) Enroll(ctx context.Context, req wire.EnrollRequest) (wire.Enrol
 	if err != nil {
 		return resp, err
 	}
-	err = c.do(ctx, wire.PathEnroll, body, map[string]string{"Content-Type": "application/json"}, &resp)
+	err = c.do(ctx, http.MethodPost, wire.PathEnroll, body, map[string]string{"Content-Type": "application/json"}, &resp)
 	return resp, err
+}
+
+// Agent pergunta ao servidor quem é o dono do crachá apresentado. Devolve
+// também a cadeia do servidor, para quem precisa guardar a CA dele.
+func (c *Client) Agent(ctx context.Context) (wire.AgentInfo, []*x509.Certificate, error) {
+	var info wire.AgentInfo
+	var chain []*x509.Certificate
+	c.onTLS = func(cs *tls.ConnectionState) { chain = cs.PeerCertificates }
+	defer func() { c.onTLS = nil }()
+	err := c.do(ctx, http.MethodGet, wire.PathAgent, nil, nil, &info)
+	return info, chain, err
 }
 
 // SendSnapshot envia o snapshot em gzip, com o SHA-256 dos bytes originais.
@@ -143,7 +161,7 @@ func (c *Client) SendSnapshot(ctx context.Context, body []byte, sum string) (wir
 	if err := w.Close(); err != nil {
 		return resp, err
 	}
-	err := c.do(ctx, wire.PathSnapshots, gz.Bytes(), map[string]string{
+	err := c.do(ctx, http.MethodPost, wire.PathSnapshots, gz.Bytes(), map[string]string{
 		"Content-Type":     "application/json",
 		"Content-Encoding": "gzip",
 		wire.SHA256Header:  sum,
@@ -154,8 +172,8 @@ func (c *Client) SendSnapshot(ctx context.Context, body []byte, sum string) (wir
 	return resp, err
 }
 
-func (c *Client) do(ctx context.Context, path string, body []byte, hdr map[string]string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+path, bytes.NewReader(body))
+func (c *Client) do(ctx context.Context, method, path string, body []byte, hdr map[string]string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -167,6 +185,9 @@ func (c *Client) do(ctx context.Context, path string, body []byte, hdr map[strin
 		return err
 	}
 	defer resp.Body.Close()
+	if c.onTLS != nil && resp.TLS != nil {
+		c.onTLS(resp.TLS)
+	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return err

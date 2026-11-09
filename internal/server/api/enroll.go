@@ -82,8 +82,12 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
+		ca, caID, err := s.signingCA(r.Context(), q, tok.TenantID)
+		if err != nil {
+			return err
+		}
 		agentID := uuid.New()
-		certPEM, certFP, err := s.ca.SignAgentCSR([]byte(req.CSR), agentID.String())
+		certPEM, certFP, err := ca.SignAgentCSR([]byte(req.CSR), agentID.String())
 		if err != nil {
 			return errorf(http.StatusBadRequest, "%s", err)
 		}
@@ -92,6 +96,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 			AssetID:         asset.ID,
 			CertFingerprint: certFP,
 			AgentVersion:    req.AgentVersion,
+			TenantCaID:      &caID,
 		}); err != nil {
 			return err
 		}
@@ -114,7 +119,10 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		resp = wire.EnrollResponse{AgentID: agentID, AssetID: asset.ID, Certificate: string(certPEM), CA: string(s.ca.PEM())}
+		resp = wire.EnrollResponse{AgentID: agentID, AssetID: asset.ID, Certificate: string(certPEM)}
+		if s.serverCA != nil {
+			resp.CA = string(s.serverCA.PEM())
+		}
 		return nil
 	})
 	if err != nil {

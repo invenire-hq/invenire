@@ -29,6 +29,7 @@ type Agent struct {
 	EnrolledAt      time.Time
 	LastSeenAt      *time.Time
 	RevokedAt       *time.Time
+	TenantCaID      *uuid.UUID
 }
 
 type ApiToken struct {
@@ -161,6 +162,17 @@ type SoftwareVersion struct {
 type Tenant struct {
 	ID   uuid.UUID
 	Name string
+}
+
+type TenantCa struct {
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	Cert        []byte
+	Fingerprint string
+	KeySealed   []byte
+	CreatedAt   time.Time
+	RetiredAt   *time.Time
+	RevokedAt   *time.Time
 }
 
 type Vendor struct {

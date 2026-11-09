@@ -34,7 +34,17 @@ type Config struct {
 	ServerURL string `json:"server_url"`
 	AgentID   string `json:"agent_id"`
 	AssetID   string `json:"asset_id"`
+	// ServerTrust diz como o servidor é conferido: "pin" (padrão, também
+	// quando vazio) pela CA guardada em ca.crt, ou "system" pelas CAs do
+	// sistema, para servidores com certificado público.
+	ServerTrust string `json:"server_trust,omitempty"`
 }
+
+// Valores de Config.ServerTrust.
+const (
+	TrustPin    = "pin"
+	TrustSystem = "system"
+)
 
 // Dir é o diretório de estado do agente.
 type Dir string
@@ -81,13 +91,40 @@ func (d Dir) Config() (Config, error) {
 }
 
 // SaveEnrollment grava o resultado do cadastro. agent.json vai por último:
-// é ele que marca o cadastro como completo.
+// é ele que marca o cadastro como completo. caPEM vazio = confiar nas CAs do
+// sistema.
 func (d Dir) SaveEnrollment(c Config, keyPEM, certPEM, caPEM []byte) error {
 	for _, f := range []struct {
 		name string
 		data []byte
-	}{{keyFile, keyPEM}, {certFile, certPEM}, {caFile, caPEM}} {
+	}{{keyFile, keyPEM}, {certFile, certPEM}} {
 		if err := writeAtomic(d.path(f.name), f.data); err != nil {
+			return err
+		}
+	}
+	return d.saveServer(c, caPEM)
+}
+
+// SetServer troca o endereço do servidor e como ele é conferido, mantendo o
+// crachá: é o que o agente faz quando o tenant muda de servidor.
+func (d Dir) SetServer(serverURL string, caPEM []byte) error {
+	c, err := d.Config()
+	if err != nil {
+		return err
+	}
+	c.ServerURL = serverURL
+	return d.saveServer(c, caPEM)
+}
+
+func (d Dir) saveServer(c Config, caPEM []byte) error {
+	if len(caPEM) > 0 {
+		c.ServerTrust = TrustPin
+		if err := writeAtomic(d.path(caFile), caPEM); err != nil {
+			return err
+		}
+	} else {
+		c.ServerTrust = TrustSystem
+		if err := os.Remove(d.path(caFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
@@ -98,8 +135,9 @@ func (d Dir) SaveEnrollment(c Config, keyPEM, certPEM, caPEM []byte) error {
 	return writeAtomic(d.path(configFile), append(b, '\n'))
 }
 
-// TLSConfig monta o cliente mTLS: apresenta o certificado do agente e só
-// confia na CA recebida no cadastro.
+// TLSConfig monta o cliente mTLS: apresenta o certificado do agente e
+// confere o servidor pela CA recebida no cadastro ou, em ServerTrust
+// "system", pelas CAs do sistema.
 func (d Dir) TLSConfig() (*tls.Config, error) {
 	cert, err := tls.LoadX509KeyPair(d.path(certFile), d.path(keyFile))
 	if errors.Is(err, os.ErrNotExist) {
@@ -107,6 +145,13 @@ func (d Dir) TLSConfig() (*tls.Config, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	c, err := d.Config()
+	if err != nil {
+		return nil, err
+	}
+	if c.ServerTrust == TrustSystem {
+		return &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}}, nil
 	}
 	caPEM, err := os.ReadFile(d.path(caFile))
 	if err != nil {

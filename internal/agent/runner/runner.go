@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -29,9 +30,12 @@ var ErrRevoked = errors.New("o servidor recusou o certificado do agente (revogad
 
 // EnrollOptions são os parâmetros do cadastro.
 type EnrollOptions struct {
-	ServerURL    string
-	Token        string
-	CAPin        []byte // SHA-256 do certificado da CA
+	ServerURL string
+	Token     string
+	// CAPin é o SHA-256 da CA que assina o certificado do servidor. Nulo =
+	// servidor com certificado público, conferido pelas CAs do sistema.
+	CAPin        []byte
+	SystemRoots  *x509.CertPool // só para testes; nulo usa as do sistema
 	AgentVersion string
 	Force        bool // cadastrar de novo mesmo já havendo cadastro
 	// Identity coleta host e SO; nulo usa collect.Identity.
@@ -66,11 +70,11 @@ func Enroll(ctx context.Context, dir state.Dir, opts EnrollOptions) (state.Confi
 		return state.Config{}, err
 	}
 
-	u, err := url.Parse(opts.ServerURL)
+	tlsCfg, err := serverTLS(opts.ServerURL, opts.CAPin, opts.SystemRoots)
 	if err != nil {
-		return state.Config{}, fmt.Errorf("URL do servidor: %w", err)
+		return state.Config{}, err
 	}
-	client, err := transport.NewClient(opts.ServerURL, transport.PinnedTLS(opts.CAPin, u.Hostname()))
+	client, err := transport.NewClient(opts.ServerURL, tlsCfg)
 	if err != nil {
 		return state.Config{}, err
 	}
@@ -84,19 +88,89 @@ func Enroll(ctx context.Context, dir state.Dir, opts EnrollOptions) (state.Confi
 	if err != nil {
 		return state.Config{}, fmt.Errorf("cadastro: %w", err)
 	}
-	// A CA que vem na resposta é a que o agente vai usar daqui em diante:
-	// precisa ser a mesma do pin.
-	if b, _ := pem.Decode([]byte(resp.CA)); b == nil || !transport.PinMatches(b.Bytes, opts.CAPin) {
-		return state.Config{}, errors.New("a CA devolvida no cadastro não confere com o pin")
+	// Com pin, a CA que vem na resposta é a que o agente vai usar daqui em
+	// diante: precisa ser a mesma do pin. Sem pin, o servidor é conferido
+	// pelas CAs do sistema, e uma CA na resposta é ignorada.
+	var caPEM []byte
+	if opts.CAPin != nil {
+		if b, _ := pem.Decode([]byte(resp.CA)); b == nil || !transport.PinMatches(b.Bytes, opts.CAPin) {
+			return state.Config{}, errors.New("a CA devolvida no cadastro não confere com o pin")
+		}
+		caPEM = []byte(resp.CA)
 	}
 
 	cfg := state.Config{ServerURL: opts.ServerURL, AgentID: resp.AgentID.String(), AssetID: resp.AssetID.String()}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-	if err := dir.SaveEnrollment(cfg, keyPEM, []byte(resp.Certificate), []byte(resp.CA)); err != nil {
+	if err := dir.SaveEnrollment(cfg, keyPEM, []byte(resp.Certificate), caPEM); err != nil {
 		return state.Config{}, err
 	}
 	// Cadastro novo começa um encadeamento novo.
 	return cfg, dir.SetLastSum("")
+}
+
+// serverTLS confere o servidor pelo pin ou, sem pin, pelas CAs do sistema.
+func serverTLS(serverURL string, pin []byte, roots *x509.CertPool) (*tls.Config, error) {
+	if pin == nil {
+		return transport.SystemTLS(roots), nil
+	}
+	u, err := url.Parse(serverURL)
+	if err != nil {
+		return nil, fmt.Errorf("URL do servidor: %w", err)
+	}
+	return transport.PinnedTLS(pin, u.Hostname()), nil
+}
+
+// SetServerOptions são os parâmetros de SetServer.
+type SetServerOptions struct {
+	ServerURL   string
+	CAPin       []byte         // como em EnrollOptions
+	SystemRoots *x509.CertPool // só para testes
+}
+
+// SetServer aponta o agente para outro servidor sem recadastrar: o crachá
+// continua o mesmo. Só grava depois de o servidor novo reconhecer o crachá,
+// para um endereço errado não deixar o agente sem servidor.
+func SetServer(ctx context.Context, dir state.Dir, opts SetServerOptions) (wire.AgentInfo, error) {
+	cfg, err := dir.Config()
+	if err != nil {
+		return wire.AgentInfo{}, err
+	}
+	tlsCfg, err := serverTLS(opts.ServerURL, opts.CAPin, opts.SystemRoots)
+	if err != nil {
+		return wire.AgentInfo{}, err
+	}
+	current, err := dir.TLSConfig()
+	if err != nil {
+		return wire.AgentInfo{}, err
+	}
+	tlsCfg.Certificates = current.Certificates
+	client, err := transport.NewClient(opts.ServerURL, tlsCfg)
+	if err != nil {
+		return wire.AgentInfo{}, err
+	}
+	info, chain, err := client.Agent(ctx)
+	var he *transport.HTTPError
+	if errors.As(err, &he) && he.Status == 401 {
+		return info, errors.New("o servidor novo não reconhece este agente: o tenant dele foi importado lá?")
+	}
+	if err != nil {
+		return info, err
+	}
+	if info.AgentID.String() != cfg.AgentID {
+		return info, fmt.Errorf("o servidor novo diz que este crachá é do agente %s, não de %s", info.AgentID, cfg.AgentID)
+	}
+	var caPEM []byte
+	if opts.CAPin != nil {
+		for _, c := range chain {
+			if c.IsCA && transport.PinMatches(c.Raw, opts.CAPin) {
+				caPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw})
+			}
+		}
+		if caPEM == nil {
+			return info, errors.New("o servidor novo não apresentou a CA do pin")
+		}
+	}
+	return info, dir.SetServer(opts.ServerURL, caPEM)
 }
 
 // Agent é o agente cadastrado.
@@ -108,6 +182,9 @@ type Agent struct {
 	MaxQueue int
 	// Collect faz a coleta completa; nulo usa collect.Collect.
 	Collect func(ctx context.Context, agentVersion string) *snapshot.Snapshot
+	// SystemRoots substitui as CAs do sistema quando o servidor é conferido
+	// por elas (ServerTrust "system"). Só para testes.
+	SystemRoots *x509.CertPool
 
 	cfg    state.Config
 	client *transport.Client
@@ -123,6 +200,9 @@ func (a *Agent) Open() error {
 	tlsCfg, err := a.Dir.TLSConfig()
 	if err != nil {
 		return err
+	}
+	if tlsCfg.RootCAs == nil {
+		tlsCfg.RootCAs = a.SystemRoots
 	}
 	client, err := transport.NewClient(cfg.ServerURL, tlsCfg)
 	if err != nil {

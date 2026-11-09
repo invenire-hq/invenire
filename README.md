@@ -16,6 +16,7 @@ A arquitetura e o modelo de dados estão no documento
 - [x] Ingestão com diff de instalações (`internal/server/ingest`)
 - [x] Regras de normalização (`internal/server/normalize`), lista de software não identificado e mapeamento manual pela API
 - [x] `invenire-agent service install | uninstall`: serviço do Windows (SCM, Event Log) e unit do systemd
+- [x] CA independente por tenant (crachás dos agentes), chave cifrada com a chave-mestra; servidor conferido por pin ou certificado público; `invenire-agent set-server`
 
 ## Do zero à primeira máquina
 
@@ -42,6 +43,9 @@ bin\invenire-server.exe serve --listen :8443 --data data --hosts localhost,127.0
 `enroll` (passo 4) precisa estar nessa lista, senão o agente recusa a conexão com
 `certificate is valid for …, not …`. Para máquinas da rede, inclua o nome DNS e o IP do servidor:
 `--hosts localhost,invenire.prefeitura.local,10.0.0.5`. A lista vale a partir da próxima subida.
+
+Na primeira subida o servidor cria `data/ca/` e `data/master.key`. Guarde os dois com o backup
+do banco (veja [Servidor](#servidor)).
 
 **3. Organização e token de cadastro** (outro terminal, com a mesma `INVENIRE_DATABASE_URL`)
 
@@ -117,6 +121,19 @@ invenire-agent run --once        # uma coleta e uma tentativa de envio
 O token e o pin vêm de `invenire-server token create`. O token também pode ir em
 `INVENIRE_ENROLL_TOKEN`, para não aparecer na lista de processos. No primeiro contato o agente
 só aceita o servidor se a cadeia TLS trouxer a CA com aquele SHA-256; depois, só confia nela.
+Se o servidor usa certificado público (`serve --tls-cert`), o `enroll` vai sem `--ca-pin` e o
+agente confere o servidor pelas CAs do sistema, como um navegador.
+
+Quando o tenant muda de servidor (da nuvem para uma instalação própria, por exemplo), o agente
+troca de endereço sem recadastrar:
+
+```sh
+invenire-agent set-server --server https://invenire.novo:8443 --ca-pin sha256:…   # sem pin = certificado público
+```
+
+O crachá é o mesmo, porque ele vem da CA do tenant, que vai junto com o tenant. Antes de gravar,
+o `set-server` pergunta ao servidor novo (`GET /v1/agent`) se ele reconhece o crachá; se não
+reconhecer, ou se o pin não conferir, nada muda. Depois, reinicie o serviço.
 
 O estado fica em `%ProgramData%\Invenire` ou `/var/lib/invenire` (`--state-dir`): chave,
 certificado, CA, `agent.json`, o hash do último snapshot (para o `prev_sha256`) e a fila em
@@ -171,23 +188,47 @@ bin/invenire-server token create --tenant "Prefeitura" --ttl 24h --description "
 bin/invenire-server actor create --tenant "Prefeitura" --name "athos" --scopes read,admin
 ```
 
-`serve` aplica as migrações e, na primeira vez, cria a CA interna em `data/ca/`. Guarde
-`data/ca/ca.key`: sem ela nenhum agente cadastrado consegue mais se autenticar. O certificado
-TLS do servidor é emitido pela mesma CA a cada subida, para os nomes de `--hosts`: todo nome ou
-IP que os agentes usam na URL do `enroll` precisa estar ali.
+`serve` aplica as migrações e, na primeira vez, cria em `data/` a CA da instalação (`ca/`) e a
+chave-mestra (`master.key`). São duas confianças separadas:
+
+| | Quem confere | Com o quê |
+|---|---|---|
+| O agente confere o servidor | o agente | a CA da instalação (`data/ca`), com o pin; ou, com `--tls-cert`/`--tls-key`, um certificado público pelas CAs do sistema |
+| O servidor confere o agente | o servidor | a CA **do tenant** do agente, uma por tenant, independente, criada no primeiro cadastro |
+
+A CA da instalação emite o certificado TLS do servidor a cada subida, para os nomes de `--hosts`:
+todo nome ou IP que os agentes usam na URL do `enroll` precisa estar ali. Um certificado público
+(`--tls-cert`, com a cadeia) é relido sozinho quando o arquivo muda, como na renovação do
+certbot.
+
+A CA de cada tenant fica no banco (`tenant_ca`), com a chave cifrada (AES-256-GCM) pela
+chave-mestra. Ela pode vir de `INVENIRE_MASTER_KEY` (32 bytes em base64) em vez do arquivo.
+**Guarde `data/master.key` e `data/ca/ca.key` junto com o backup do banco:** sem a chave-mestra o
+servidor ainda confere os crachás emitidos, mas não emite novos; sem `ca.key` os agentes em
+modo pin deixam de reconhecer o servidor. Como a CA do tenant não depende da instalação, levar
+um tenant para outro servidor é levar a CA dele junto, e os agentes só trocam de endereço
+(`set-server`).
+
+Agentes cadastrados antes das CAs por tenant têm crachá da CA da instalação. Na subida, o `serve`
+registra essa CA, só para conferir, em cada tenant que tem esses agentes; os cadastros novos já
+saem da CA do tenant.
 
 `token create` mostra o token de cadastro (uso único, só o SHA-256 fica no banco) e o pin
-SHA-256 da CA, que o agente usa para conferir o servidor no primeiro contato.
+SHA-256 da CA da instalação, que o agente usa para conferir o servidor no primeiro contato. Com
+certificado público, não há pin.
 
 | Rota | Autenticação | Faz |
 |---|---|---|
-| `POST /v1/enroll` | token de cadastro | recebe CSR e dados do host; devolve certificado cliente e CA |
-| `POST /v1/snapshots` | certificado cliente de agente não revogado | recebe o snapshot (gzip opcional) com o SHA-256 no cabeçalho `Invenire-Snapshot-SHA256`; 202 se novo, 200 se repetido |
+| `POST /v1/enroll` | token de cadastro | recebe CSR e dados do host; devolve o crachá, assinado pela CA do tenant, e a CA da instalação (vazia com certificado público) |
+| `GET /v1/agent` | crachá de agente | diz de qual agente e ativo é o crachá; o `set-server` usa para conferir o servidor novo |
+| `POST /v1/snapshots` | crachá de agente não revogado, conferido contra a CA do tenant que o emitiu | recebe o snapshot (gzip opcional) com o SHA-256 no cabeçalho `Invenire-Snapshot-SHA256`; 202 se novo, 200 se repetido |
 | `GET /v1/software/unmapped` | token de API, escopo `read` | nomes sem produto nos ativos do tenant, dos mais comuns para os menos, com o palpite das regras (`?source=`, `?limit=`, `?cursor=`) |
 | `PUT /v1/software/raw/{id}` | token de API, escopo `admin` | mapeamento manual: `{"vendor": "…", "product": "…"}` |
 | `GET /healthz` | nenhuma | 204 se o banco responde |
 
-Revogar um agente é preencher `agent.revoked_at`; a próxima requisição dele recebe 401.
+Revogar um agente é preencher `agent.revoked_at`; a próxima requisição dele recebe 401. Revogar
+a CA de um tenant (`tenant_ca.revoked_at`) derruba todos os crachás dela de uma vez; o cadastro
+seguinte cria uma CA nova.
 
 `actor create` cria um usuário ou pipeline (`--kind human|ai_agent|ci`) e mostra um token de
 API (`inva_…`, enviado como `Authorization: Bearer`). Só o SHA-256 fica em `api_token`;

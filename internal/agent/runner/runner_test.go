@@ -44,7 +44,11 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := api.New(pool, ca, quiet)
+	mk, err := pki.NewMasterKey(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := api.New(pool, api.Config{ServerCA: ca, MasterKey: mk}, quiet)
 	if err != nil {
 		t.Fatal(err)
 	}

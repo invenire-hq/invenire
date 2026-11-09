@@ -33,6 +33,7 @@ func usage() {
 comandos:
   enroll    cadastra o agente no servidor com um token de uso único
   run       coleta periodicamente e envia ao servidor, com fila local
+  set-server  aponta para outro servidor sem recadastrar (o tenant mudou de servidor)
   service   install | uninstall: roda o run como serviço do sistema
   collect   coleta o inventário e grava o snapshot JSON (modo offline)
   version   mostra a versão
@@ -65,6 +66,8 @@ func main() {
 		err = runCollect(ctx, os.Args[2:])
 	case "enroll":
 		err = runEnroll(ctx, os.Args[2:])
+	case "set-server":
+		err = runSetServer(ctx, os.Args[2:])
 	case "run":
 		err = runRun(ctx, os.Args[2:], slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	case "service":
@@ -116,7 +119,7 @@ func runEnroll(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("enroll", flag.ExitOnError)
 	server := fs.String("server", "", "URL do servidor, https://host:porta (obrigatório)")
 	token := fs.String("token", "", "token de cadastro (ou INVENIRE_ENROLL_TOKEN)")
-	pin := fs.String("ca-pin", "", "pin da CA mostrado por invenire-server token create, sha256:… (obrigatório)")
+	pin := fs.String("ca-pin", "", "pin da CA mostrado por invenire-server token create, sha256:…; vazio = servidor com certificado público")
 	dir := fs.String("state-dir", state.DefaultDir(), "diretório de estado do agente")
 	force := fs.Bool("force", false, "cadastrar de novo mesmo já havendo cadastro")
 	fs.Parse(args)
@@ -124,10 +127,10 @@ func runEnroll(ctx context.Context, args []string) error {
 	if *token == "" {
 		*token = os.Getenv("INVENIRE_ENROLL_TOKEN")
 	}
-	if *server == "" || *token == "" || *pin == "" {
-		return errors.New("--server, --token e --ca-pin são obrigatórios")
+	if *server == "" || *token == "" {
+		return errors.New("--server e --token são obrigatórios")
 	}
-	caPin, err := transport.ParsePin(*pin)
+	caPin, err := parseOptionalPin(*pin)
 	if err != nil {
 		return err
 	}
@@ -189,4 +192,38 @@ func runRun(ctx context.Context, args []string, log *slog.Logger) error {
 		return fmt.Errorf("%d snapshot(s) continuam na fila: %w", n, err)
 	}
 	return err
+}
+
+// parseOptionalPin aceita pin vazio: servidor com certificado público.
+func parseOptionalPin(pin string) ([]byte, error) {
+	if pin == "" {
+		fmt.Fprintln(os.Stderr, "sem --ca-pin: o servidor será conferido pelas CAs do sistema (certificado público)")
+		return nil, nil
+	}
+	return transport.ParsePin(pin)
+}
+
+func runSetServer(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("set-server", flag.ExitOnError)
+	server := fs.String("server", "", "URL do servidor novo, https://host:porta (obrigatório)")
+	pin := fs.String("ca-pin", "", "pin da CA do servidor novo, sha256:…; vazio = certificado público")
+	dir := fs.String("state-dir", state.DefaultDir(), "diretório de estado do agente")
+	fs.Parse(args)
+	if *server == "" {
+		return errors.New("--server é obrigatório")
+	}
+	caPin, err := parseOptionalPin(*pin)
+	if err != nil {
+		return err
+	}
+	d, err := state.Open(*dir)
+	if err != nil {
+		return err
+	}
+	info, err := runner.SetServer(ctx, d, runner.SetServerOptions{ServerURL: *server, CAPin: caPin})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "servidor trocado para %s (agente %s reconhecido)\nse o agente roda como serviço, reinicie-o\n", *server, info.AgentID)
+	return nil
 }

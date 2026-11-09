@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"database/sql"
 	"encoding/hex"
 	"encoding/pem"
@@ -22,6 +23,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -119,11 +121,16 @@ func runServe(ctx context.Context, args []string) error {
 	listen := fs.String("listen", ":8443", "endereço de escuta")
 	dataDir := fs.String("data", "data", "diretório de dados (chave e certificado da CA)")
 	hosts := fs.String("hosts", "localhost,127.0.0.1", "nomes e IPs do certificado TLS do servidor, separados por vírgula")
+	tlsCert := fs.String("tls-cert", "", "certificado público do servidor (PEM, com a cadeia); sem ele, a CA da instalação emite um")
+	tlsKey := fs.String("tls-key", "", "chave do --tls-cert")
 	minConf := fs.Float64("auto-map-confidence", normalize.DefaultMinConfidence,
 		"confiança mínima para uma regra mapear software sem revisão (0 a 1)")
 	fs.Parse(args)
 	if *minConf <= 0 || *minConf > 1 {
 		return errors.New("--auto-map-confidence precisa estar entre 0 (exclusive) e 1")
+	}
+	if (*tlsCert == "") != (*tlsKey == "") {
+		return errors.New("--tls-cert e --tls-key vão juntos")
 	}
 
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
@@ -137,15 +144,44 @@ func runServe(ctx context.Context, args []string) error {
 	}
 	defer pool.Close()
 
-	ca, err := pki.LoadOrCreate(filepath.Join(*dataDir, "ca"))
+	master, err := pki.LoadOrCreateMasterKey(*dataDir)
 	if err != nil {
 		return err
 	}
-	cert, err := ca.ServerCert(strings.Split(*hosts, ","))
-	if err != nil {
+	// Duas confianças separadas: o agente confere o servidor pela CA da
+	// instalação (com o pin) ou pelo certificado público; o servidor confere
+	// o agente pela CA do tenant, no banco.
+	caDir := filepath.Join(*dataDir, "ca")
+	var serverCA, legacyCA *pki.CA
+	var cert tls.Certificate
+	mode := "internal"
+	if *tlsCert != "" {
+		mode = "public"
+		if cert, err = tls.LoadX509KeyPair(*tlsCert, *tlsKey); err != nil {
+			return fmt.Errorf("--tls-cert: %w", err)
+		}
+		if legacyCA, err = pki.Load(caDir); err != nil {
+			return err
+		}
+	} else {
+		if serverCA, err = pki.LoadOrCreate(caDir); err != nil {
+			return err
+		}
+		if cert, err = serverCA.ServerCert(strings.Split(*hosts, ",")); err != nil {
+			return err
+		}
+		legacyCA = serverCA
+	}
+	// Para o token create saber se mostra o pin.
+	if err := os.WriteFile(filepath.Join(*dataDir, tlsModeFile), []byte(mode+"\n"), 0o644); err != nil {
 		return err
 	}
-	srv, err := api.New(pool, ca, log)
+	if n, err := api.ImportLegacyCA(ctx, pool, legacyCA); err != nil {
+		return fmt.Errorf("CA antiga da instalação: %w", err)
+	} else if n > 0 {
+		log.Info("agentes antigos ligados à CA da instalação", "agents", n)
+	}
+	srv, err := api.New(pool, api.Config{ServerCA: serverCA, MasterKey: master}, log)
 	if err != nil {
 		return err
 	}
@@ -169,10 +205,17 @@ func runServe(ctx context.Context, args []string) error {
 	// Antes de fechar o pool: a transação em curso termina ou é desfeita.
 	defer func() { stopIngest(); <-ingestDone }()
 
+	tlsCfg := srv.TLSConfig(cert)
+	if *tlsCert != "" {
+		// Certificado renovado em disco (certbot, por exemplo) entra sem reiniciar.
+		r := &certReloader{certFile: *tlsCert, keyFile: *tlsKey, cert: &cert, log: log}
+		r.mod, _ = modTime(*tlsCert)
+		tlsCfg.Certificates, tlsCfg.GetCertificate = nil, r.get
+	}
 	hs := &http.Server{
 		Addr:              *listen,
 		Handler:           srv.Handler(),
-		TLSConfig:         srv.TLSConfig(cert),
+		TLSConfig:         tlsCfg,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       5 * time.Minute, // snapshots grandes em links lentos
 		IdleTimeout:       2 * time.Minute,
@@ -185,7 +228,11 @@ func runServe(ctx context.Context, args []string) error {
 		hs.Shutdown(shutdownCtx)
 	}()
 
-	log.Info("invenire-server no ar", "version", version, "listen", *listen, "ca_sha256", caPin(ca))
+	if serverCA != nil {
+		log.Info("invenire-server no ar", "version", version, "listen", *listen, "tls", mode, "ca_sha256", caPin(serverCA))
+	} else {
+		log.Info("invenire-server no ar", "version", version, "listen", *listen, "tls", mode)
+	}
 	if err := hs.ListenAndServeTLS("", ""); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -245,6 +292,10 @@ func runTokenCreate(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Printf("token:   %s\nexpira:  %s\n", token, expires.Format(time.RFC3339))
+	if m, _ := os.ReadFile(filepath.Join(*dataDir, tlsModeFile)); strings.TrimSpace(string(m)) == "public" {
+		fmt.Println("ca pin:  nenhum (o servidor usa certificado público: rode o enroll sem --ca-pin)")
+		return nil
+	}
 	// Só lê o certificado: rodar no diretório errado não pode criar outra CA.
 	if b, err := os.ReadFile(filepath.Join(*dataDir, "ca", "ca.crt")); err == nil {
 		if blk, _ := pem.Decode(b); blk != nil {
@@ -306,4 +357,47 @@ func runActorCreate(ctx context.Context, args []string) error {
 		fmt.Printf("expira:  %s\n", expires.Format(time.RFC3339))
 	}
 	return nil
+}
+
+// tlsModeFile guarda, no diretório de dados, se o serve usa o certificado
+// da CA da instalação (internal) ou um público (public).
+const tlsModeFile = "tls-mode"
+
+// certReloader relê o certificado público quando o arquivo muda, conferindo
+// no máximo uma vez por minuto.
+type certReloader struct {
+	certFile, keyFile string
+	log               *slog.Logger
+
+	mu      sync.Mutex
+	cert    *tls.Certificate
+	mod     time.Time
+	checked time.Time
+}
+
+func (r *certReloader) get(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if time.Since(r.checked) >= time.Minute {
+		r.checked = time.Now()
+		if mod, err := modTime(r.certFile); err == nil && !mod.Equal(r.mod) {
+			c, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
+			if err != nil {
+				// Certificado e chave trocados em momentos diferentes: tenta de novo depois.
+				r.log.Warn("certificado público novo ainda ilegível; mantendo o anterior", "err", err)
+			} else {
+				r.cert, r.mod = &c, mod
+				r.log.Info("certificado público recarregado", "file", r.certFile)
+			}
+		}
+	}
+	return r.cert, nil
+}
+
+func modTime(path string) (time.Time, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return st.ModTime(), nil
 }

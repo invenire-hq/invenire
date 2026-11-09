@@ -13,6 +13,9 @@ import (
 const (
 	PathEnroll    = "/v1/enroll"
 	PathSnapshots = "/v1/snapshots"
+	// PathAgent devolve quem o crachá apresentado é, para o agente conferir
+	// se um servidor novo o reconhece (set-server).
+	PathAgent = "/v1/agent"
 )
 
 // SHA256Header leva o SHA-256 (hex) do snapshot descomprimido, exatamente
@@ -31,13 +34,15 @@ type EnrollRequest struct {
 	OS           snapshot.OS   `json:"os"`
 }
 
-// EnrollResponse devolve o certificado do agente e a CA, que o agente passa
-// a usar para validar o servidor.
+// EnrollResponse devolve o crachá do agente, assinado pela CA do tenant, e a
+// CA que assina o certificado do servidor, que o agente passa a usar para
+// conferir o servidor. CA vem vazia quando o servidor usa certificado
+// público: aí o agente confia nas CAs do sistema.
 type EnrollResponse struct {
 	AgentID     uuid.UUID `json:"agent_id"`
 	AssetID     uuid.UUID `json:"asset_id"`
 	Certificate string    `json:"certificate"`
-	CA          string    `json:"ca"`
+	CA          string    `json:"ca,omitempty"`
 }
 
 // SnapshotResponse é a resposta de POST /v1/snapshots.
@@ -51,4 +56,10 @@ type SnapshotResponse struct {
 // Error é o corpo de toda resposta de erro.
 type Error struct {
 	Error string `json:"error"`
+}
+
+// AgentInfo é a resposta de GET /v1/agent.
+type AgentInfo struct {
+	AgentID uuid.UUID `json:"agent_id"`
+	AssetID uuid.UUID `json:"asset_id"`
 }

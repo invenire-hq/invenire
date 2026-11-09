@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/athosbes/invenire/internal/server/api"
@@ -46,7 +47,11 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := api.New(pool, ca, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mk, err := pki.NewMasterKey(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := api.New(pool, api.Config{ServerCA: ca, MasterKey: mk}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +193,7 @@ func TestEnroll(t *testing.T) {
 	for _, c := range changes {
 		kinds = append(kinds, c.Kind)
 	}
-	if got := strings.Join(kinds, ","); got != "asset_new,agent_enrolled,agent_enrolled" {
+	if got := strings.Join(kinds, ","); got != "tenant_ca_created,asset_new,agent_enrolled,agent_enrolled" {
 		t.Fatalf("change_log: %s", got)
 	}
 }
@@ -234,7 +239,7 @@ func TestSnapshots(t *testing.T) {
 		t.Fatalf("snapshot com encadeamento quebrado: %d %s", status, msg)
 	}
 	changes, _ := e.q.ListChangesAfter(context.Background(), store.ListChangesAfterParams{TenantID: e.tenant.ID, Limit: 10})
-	if last := changes[len(changes)-1]; last.Kind != "snapshot_chain_broken" || len(changes) != 3 {
+	if last := changes[len(changes)-1]; last.Kind != "snapshot_chain_broken" || len(changes) != 4 {
 		t.Fatalf("esperava um snapshot_chain_broken no fim: %+v", changes)
 	}
 
@@ -284,10 +289,146 @@ func TestForeignCA(t *testing.T) {
 	}
 	cb, _ := pem.Decode(certPEM)
 	c := e.client(&tls.Certificate{Certificate: [][]byte{cb.Bytes}, PrivateKey: key})
-	req, _ := http.NewRequest("POST", e.srv.URL+"/v1/snapshots", strings.NewReader("{}"))
-	if resp, err := c.Do(req); err == nil {
-		resp.Body.Close()
-		t.Fatalf("certificado de outra CA aceito: %d", resp.StatusCode)
+	if status := e.get(c, "/v1/agent", nil); status != http.StatusUnauthorized {
+		t.Fatalf("certificado de outra CA aceito: %d", status)
+	}
+
+	// Mesmo que o banco tivesse um agente com esse crachá, ele não confere
+	// com a CA do tenant que diz tê-lo assinado.
+	ctx := context.Background()
+	_, _, _ = e.enroll(e.token(), testHost) // cria a CA do tenant
+	ca, err := e.q.GetSigningCA(ctx, e.tenant.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asset, err := e.q.UpsertAsset(ctx, store.UpsertAssetParams{TenantID: e.tenant.ID, Fingerprint: "intruso"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.q.CreateAgent(ctx, store.CreateAgentParams{ID: uuid.New(), AssetID: asset.ID,
+		CertFingerprint: pki.Fingerprint(cb.Bytes), AgentVersion: "x", TenantCaID: &ca.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if status := e.get(c, "/v1/agent", nil); status != http.StatusUnauthorized {
+		t.Fatalf("crachá de outra CA aceito por estar no banco: %d", status)
+	}
+}
+
+func (e *env) get(c *http.Client, path string, out any) int {
+	e.t.Helper()
+	resp, err := c.Get(e.srv.URL + path)
+	if err != nil {
+		e.t.Fatalf("GET %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	if out != nil {
+		json.NewDecoder(resp.Body).Decode(out)
+	}
+	return resp.StatusCode
+}
+
+func issuer(t *testing.T, cert *tls.Certificate) string {
+	c, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c.Issuer.CommonName
+}
+
+// Cada tenant tem a sua CA, criada no primeiro cadastro; o crachá de um não
+// vale com a CA revogada.
+func TestTenantCAs(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	other, err := e.q.CreateTenant(ctx, "outro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTok, _, err := api.NewEnrollmentToken(ctx, e.q, other.ID, "", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, a1, c1 := e.enroll(e.token(), testHost)
+	_, _, c2 := e.enroll(e.token(), snapshot.Host{MachineID: "segunda-maquina"})
+	_, _, c3 := e.enroll(otherTok, snapshot.Host{MachineID: "maquina-do-outro"})
+	if issuer(t, c1) != "Invenire CA: teste" || issuer(t, c2) != issuer(t, c1) || issuer(t, c3) != "Invenire CA: outro" {
+		t.Fatalf("emissores: %q %q %q", issuer(t, c1), issuer(t, c2), issuer(t, c3))
+	}
+	var info wire.AgentInfo
+	if status := e.get(e.client(c1), "/v1/agent", &info); status != http.StatusOK || info.AgentID != a1.AgentID {
+		t.Fatalf("GET /v1/agent: %d %+v", status, info)
+	}
+	changes, _ := e.q.ListChangesAfter(ctx, store.ListChangesAfterParams{TenantID: e.tenant.ID, Limit: 10})
+	var created int
+	for _, c := range changes {
+		if c.Kind == "tenant_ca_created" {
+			created++
+		}
+	}
+	if created != 1 {
+		t.Fatalf("tenant_ca_created: %d", created)
+	}
+
+	ca, err := e.q.GetSigningCA(ctx, e.tenant.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.q.RevokeTenantCA(ctx, ca.ID); err != nil {
+		t.Fatal(err)
+	}
+	if status := e.get(e.client(c1), "/v1/agent", nil); status != http.StatusUnauthorized {
+		t.Fatalf("CA revogada aceita: %d", status)
+	}
+	if status := e.get(e.client(c3), "/v1/agent", nil); status != http.StatusOK {
+		t.Fatalf("o outro tenant parou junto: %d", status)
+	}
+	// O próximo cadastro cria uma CA nova para o tenant.
+	_, _, c4 := e.enroll(e.token(), snapshot.Host{MachineID: "terceira"})
+	if c4 == nil || e.get(e.client(c4), "/v1/agent", nil) != http.StatusOK {
+		t.Fatal("cadastro depois de revogar a CA")
+	}
+}
+
+// Agentes de antes das CAs por tenant, com crachá da CA da instalação,
+// continuam valendo depois de ImportLegacyCA.
+func TestLegacyAgents(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	csrDER, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, key)
+	agentID := uuid.New()
+	certPEM, fp, err := e.ca.SignAgentCSR(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}), agentID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	asset, err := e.q.UpsertAsset(ctx, store.UpsertAssetParams{TenantID: e.tenant.ID, Fingerprint: "antiga"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.q.CreateAgent(ctx, store.CreateAgentParams{ID: agentID, AssetID: asset.ID, CertFingerprint: fp, AgentVersion: "0.0.9"}); err != nil {
+		t.Fatal(err)
+	}
+	cb, _ := pem.Decode(certPEM)
+	c := e.client(&tls.Certificate{Certificate: [][]byte{cb.Bytes}, PrivateKey: key})
+	if status := e.get(c, "/v1/agent", nil); status != http.StatusUnauthorized {
+		t.Fatalf("agente sem CA aceito: %d", status)
+	}
+	if _, err := api.ImportLegacyCA(ctx, e.pool, nil); err == nil {
+		t.Fatal("importou sem a CA antiga")
+	}
+	for range 2 { // de novo não muda nada
+		if _, err := api.ImportLegacyCA(ctx, e.pool, e.ca); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if status := e.get(c, "/v1/agent", nil); status != http.StatusOK {
+		t.Fatalf("agente antigo depois da importação: %d", status)
+	}
+	// Cadastros novos não saem da CA antiga.
+	_, _, fresh := e.enroll(e.token(), testHost)
+	if issuer(t, fresh) != "Invenire CA: teste" {
+		t.Fatalf("emissor do cadastro novo: %q", issuer(t, fresh))
 	}
 }
 
