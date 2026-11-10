@@ -22,14 +22,16 @@ type Actor struct {
 }
 
 type Agent struct {
-	ID              uuid.UUID
-	AssetID         uuid.UUID
-	CertFingerprint string
-	AgentVersion    string
-	EnrolledAt      time.Time
-	LastSeenAt      *time.Time
-	RevokedAt       *time.Time
-	TenantCaID      *uuid.UUID
+	ID                  uuid.UUID
+	AssetID             uuid.UUID
+	CertFingerprint     string
+	AgentVersion        string
+	EnrolledAt          time.Time
+	LastSeenAt          *time.Time
+	RevokedAt           *time.Time
+	TenantCaID          *uuid.UUID
+	PrevCertFingerprint *string
+	PrevTenantCaID      *uuid.UUID
 }
 
 type ApiToken struct {

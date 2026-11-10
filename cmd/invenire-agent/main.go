@@ -184,6 +184,11 @@ func runRun(ctx context.Context, args []string, log *slog.Logger) error {
 		return err
 	}
 
+	if renewed, err := a.RenewIfDue(ctx); err != nil {
+		log.WarnContext(ctx, "crachá não renovado; o atual continua em uso", "err", err)
+	} else if renewed {
+		log.InfoContext(ctx, "crachá renovado")
+	}
 	if _, err := a.Enqueue(ctx); err != nil {
 		return err
 	}

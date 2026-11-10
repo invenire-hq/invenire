@@ -4,6 +4,7 @@ package runner
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -185,6 +186,9 @@ type Agent struct {
 	// SystemRoots substitui as CAs do sistema quando o servidor é conferido
 	// por elas (ServerTrust "system"). Só para testes.
 	SystemRoots *x509.CertPool
+	// RenewBefore é quanto antes do vencimento o crachá é renovado. Zero = um
+	// terço da validade (oito meses, num crachá de dois anos).
+	RenewBefore time.Duration
 
 	cfg    state.Config
 	client *transport.Client
@@ -220,6 +224,48 @@ func (a *Agent) Open() error {
 	}
 	a.cfg, a.client, a.queue = cfg, client, q
 	return nil
+}
+
+// RenewIfDue pede um crachá novo quando o atual está perto de vencer, e passa
+// a usá-lo. A chave continua a mesma. Falhar não é grave: o crachá atual
+// segue valendo e a próxima coleta tenta de novo.
+func (a *Agent) RenewIfDue(ctx context.Context) (renewed bool, err error) {
+	cert, key, err := a.Dir.Identity()
+	if err != nil {
+		return false, err
+	}
+	before := a.RenewBefore
+	if before <= 0 {
+		before = cert.NotAfter.Sub(cert.NotBefore) / 3
+	}
+	if time.Until(cert.NotAfter) > before {
+		return false, nil
+	}
+	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, key)
+	if err != nil {
+		return false, err
+	}
+	resp, err := a.client.Renew(ctx, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csr})))
+	if err != nil {
+		return false, fmt.Errorf("renovar o crachá (vence em %s): %w", cert.NotAfter.Format(time.DateOnly), err)
+	}
+	// Só troca por um crachá que sirva: da nossa chave e que dure mais.
+	b, _ := pem.Decode([]byte(resp.Certificate))
+	if b == nil {
+		return false, errors.New("renovar o crachá: resposta sem certificado")
+	}
+	fresh, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		return false, fmt.Errorf("renovar o crachá: %w", err)
+	}
+	pub, ok := key.Public().(interface{ Equal(crypto.PublicKey) bool })
+	if !ok || !pub.Equal(fresh.PublicKey) || !fresh.NotAfter.After(cert.NotAfter) {
+		return false, errors.New("renovar o crachá: o servidor devolveu um certificado de outra chave ou que não vence depois do atual")
+	}
+	if err := a.Dir.SaveCert([]byte(resp.Certificate)); err != nil {
+		return false, err
+	}
+	return true, a.Open()
 }
 
 // Enqueue coleta um snapshot, encadeia no anterior e o põe na fila.
@@ -306,6 +352,11 @@ func (a *Agent) Run(ctx context.Context, interval time.Duration) error {
 	for {
 		// Até 10% de variação, para as máquinas não coletarem todas juntas.
 		next := time.Now().Add(interval + mrand.N(interval/10+1))
+		if renewed, err := a.RenewIfDue(ctx); err != nil {
+			a.Log.WarnContext(ctx, "crachá não renovado; o atual continua em uso", "err", err)
+		} else if renewed {
+			a.Log.InfoContext(ctx, "crachá renovado")
+		}
 		if _, err := a.Enqueue(ctx); err != nil {
 			a.Log.ErrorContext(ctx, "coleta falhou", "err", err)
 		}

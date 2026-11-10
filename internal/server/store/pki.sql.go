@@ -31,10 +31,12 @@ func (q *Queries) AssignLegacyAgents(ctx context.Context, arg AssignLegacyAgents
 }
 
 const getAgentForAuth = `-- name: GetAgentForAuth :one
-SELECT g.id, g.asset_id, g.cert_fingerprint, g.agent_version, g.enrolled_at, g.last_seen_at, g.revoked_at, g.tenant_ca_id, c.cert AS ca_cert
+SELECT g.id, g.asset_id, g.cert_fingerprint, g.agent_version, g.enrolled_at, g.last_seen_at, g.revoked_at, g.tenant_ca_id, g.prev_cert_fingerprint, g.prev_tenant_ca_id, c.cert AS ca_cert
 FROM agent g
-JOIN tenant_ca c ON c.id = g.tenant_ca_id
-WHERE g.cert_fingerprint = $1 AND g.revoked_at IS NULL AND c.revoked_at IS NULL
+JOIN tenant_ca c ON c.id = CASE WHEN g.cert_fingerprint = $1::text
+                                THEN g.tenant_ca_id ELSE g.prev_tenant_ca_id END
+WHERE (g.cert_fingerprint = $1::text OR g.prev_cert_fingerprint = $1::text)
+  AND g.revoked_at IS NULL AND c.revoked_at IS NULL
 `
 
 type GetAgentForAuthRow struct {
@@ -43,9 +45,10 @@ type GetAgentForAuthRow struct {
 }
 
 // Autenticação mTLS: o agente pelo crachá, com a CA que o assinou. Agente
-// revogado, CA revogada ou agente sem CA não são encontrados.
-func (q *Queries) GetAgentForAuth(ctx context.Context, certFingerprint string) (GetAgentForAuthRow, error) {
-	row := q.db.QueryRow(ctx, getAgentForAuth, certFingerprint)
+// revogado, CA revogada ou agente sem CA não são encontrados. Vale o crachá
+// atual e o anterior à última renovação, cada um com a sua CA.
+func (q *Queries) GetAgentForAuth(ctx context.Context, fingerprint string) (GetAgentForAuthRow, error) {
+	row := q.db.QueryRow(ctx, getAgentForAuth, fingerprint)
 	var i GetAgentForAuthRow
 	err := row.Scan(
 		&i.Agent.ID,
@@ -56,6 +59,8 @@ func (q *Queries) GetAgentForAuth(ctx context.Context, certFingerprint string) (
 		&i.Agent.LastSeenAt,
 		&i.Agent.RevokedAt,
 		&i.Agent.TenantCaID,
+		&i.Agent.PrevCertFingerprint,
+		&i.Agent.PrevTenantCaID,
 		&i.CaCert,
 	)
 	return i, err
@@ -156,6 +161,39 @@ func (q *Queries) InsertSigningCA(ctx context.Context, arg InsertSigningCAParams
 		&i.RevokedAt,
 	)
 	return i, err
+}
+
+const renewAgentCert = `-- name: RenewAgentCert :one
+UPDATE agent SET
+  prev_cert_fingerprint = CASE WHEN cert_fingerprint = $1::text THEN cert_fingerprint ELSE prev_cert_fingerprint END,
+  prev_tenant_ca_id     = CASE WHEN cert_fingerprint = $1::text THEN tenant_ca_id ELSE prev_tenant_ca_id END,
+  cert_fingerprint      = $2,
+  tenant_ca_id          = $3
+WHERE id = $4 AND revoked_at IS NULL
+  AND (cert_fingerprint = $1::text OR prev_cert_fingerprint = $1::text)
+RETURNING id
+`
+
+type RenewAgentCertParams struct {
+	Presented       string
+	CertFingerprint string
+	TenantCaID      *uuid.UUID
+	ID              uuid.UUID
+}
+
+// Troca o crachá do agente. presented é o crachá com que ele se apresentou:
+// se for o atual, vira o anterior; se já for o anterior (a resposta da
+// renovação passada se perdeu), continua sendo, e só o atual é trocado.
+func (q *Queries) RenewAgentCert(ctx context.Context, arg RenewAgentCertParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, renewAgentCert,
+		arg.Presented,
+		arg.CertFingerprint,
+		arg.TenantCaID,
+		arg.ID,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const revokeTenantCA = `-- name: RevokeTenantCA :exec

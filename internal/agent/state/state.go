@@ -7,6 +7,7 @@
 package state
 
 import (
+	"crypto"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -166,6 +167,33 @@ func (d Dir) TLSConfig() (*tls.Config, error) {
 		RootCAs:      pool,
 		Certificates: []tls.Certificate{cert},
 	}, nil
+}
+
+// Identity devolve o crachá do agente e a chave dele.
+func (d Dir) Identity() (*x509.Certificate, crypto.Signer, error) {
+	pair, err := tls.LoadX509KeyPair(d.path(certFile), d.path(keyFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil, ErrNotEnrolled
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	cert, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return nil, nil, err
+	}
+	key, ok := pair.PrivateKey.(crypto.Signer)
+	if !ok {
+		return nil, nil, errors.New("agent.key não assina")
+	}
+	return cert, key, nil
+}
+
+// SaveCert troca o crachá (renovação). A chave é a mesma, então é um arquivo
+// só: uma queda no meio deixa o crachá antigo ou o novo, nunca um par que
+// não combina.
+func (d Dir) SaveCert(certPEM []byte) error {
+	return writeAtomic(d.path(certFile), certPEM)
 }
 
 // LastSum devolve o SHA-256 do último snapshot gerado, ou vazio.

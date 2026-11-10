@@ -26,11 +26,27 @@ WHERE a.id = g.asset_id AND a.tenant_id = $1 AND g.tenant_ca_id IS NULL;
 
 -- name: GetAgentForAuth :one
 -- Autenticação mTLS: o agente pelo crachá, com a CA que o assinou. Agente
--- revogado, CA revogada ou agente sem CA não são encontrados.
+-- revogado, CA revogada ou agente sem CA não são encontrados. Vale o crachá
+-- atual e o anterior à última renovação, cada um com a sua CA.
 SELECT sqlc.embed(g), c.cert AS ca_cert
 FROM agent g
-JOIN tenant_ca c ON c.id = g.tenant_ca_id
-WHERE g.cert_fingerprint = $1 AND g.revoked_at IS NULL AND c.revoked_at IS NULL;
+JOIN tenant_ca c ON c.id = CASE WHEN g.cert_fingerprint = sqlc.arg(fingerprint)::text
+                                THEN g.tenant_ca_id ELSE g.prev_tenant_ca_id END
+WHERE (g.cert_fingerprint = sqlc.arg(fingerprint)::text OR g.prev_cert_fingerprint = sqlc.arg(fingerprint)::text)
+  AND g.revoked_at IS NULL AND c.revoked_at IS NULL;
+
+-- name: RenewAgentCert :one
+-- Troca o crachá do agente. presented é o crachá com que ele se apresentou:
+-- se for o atual, vira o anterior; se já for o anterior (a resposta da
+-- renovação passada se perdeu), continua sendo, e só o atual é trocado.
+UPDATE agent SET
+  prev_cert_fingerprint = CASE WHEN cert_fingerprint = sqlc.arg(presented)::text THEN cert_fingerprint ELSE prev_cert_fingerprint END,
+  prev_tenant_ca_id     = CASE WHEN cert_fingerprint = sqlc.arg(presented)::text THEN tenant_ca_id ELSE prev_tenant_ca_id END,
+  cert_fingerprint      = sqlc.arg(cert_fingerprint),
+  tenant_ca_id          = sqlc.arg(tenant_ca_id)
+WHERE id = sqlc.arg(id) AND revoked_at IS NULL
+  AND (cert_fingerprint = sqlc.arg(presented)::text OR prev_cert_fingerprint = sqlc.arg(presented)::text)
+RETURNING id;
 
 -- name: RevokeTenantCA :exec
 UPDATE tenant_ca SET retired_at = coalesce(retired_at, now()), revoked_at = now()

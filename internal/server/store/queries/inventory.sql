@@ -57,6 +57,12 @@ UPDATE agent SET last_seen_at = now(), agent_version = $2 WHERE id = $1;
 -- name: RevokeAgent :exec
 UPDATE agent SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL;
 
+-- name: RevokeAssetAgents :execrows
+-- No recadastro: os crachás anteriores do ativo deixam de valer. Sem isso,
+-- quem recadastra uma máquina (ou se passa por ela com um token) conviveria
+-- com o agente antigo sem ninguém notar.
+UPDATE agent SET revoked_at = now() WHERE asset_id = $1 AND revoked_at IS NULL;
+
 -- name: InsertSnapshot :one
 -- O SHA-256 é único: reenviar o mesmo snapshot devolve o existente.
 -- body são os bytes exatos; payload, o mesmo conteúdo como jsonb.

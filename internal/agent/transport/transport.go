@@ -152,6 +152,17 @@ func (c *Client) Agent(ctx context.Context) (wire.AgentInfo, []*x509.Certificate
 	return info, chain, err
 }
 
+// Renew troca o crachá apresentado por um novo, para a chave do CSR.
+func (c *Client) Renew(ctx context.Context, csrPEM string) (wire.RenewResponse, error) {
+	var resp wire.RenewResponse
+	body, err := json.Marshal(wire.RenewRequest{CSR: csrPEM})
+	if err != nil {
+		return resp, err
+	}
+	err = c.do(ctx, http.MethodPost, wire.PathAgentRenew, body, map[string]string{"Content-Type": "application/json"}, &resp)
+	return resp, err
+}
+
 // SendSnapshot envia o snapshot em gzip, com o SHA-256 dos bytes originais.
 func (c *Client) SendSnapshot(ctx context.Context, body []byte, sum string) (wire.SnapshotResponse, error) {
 	var resp wire.SnapshotResponse

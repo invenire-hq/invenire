@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/athosbes/invenire/internal/server/pki"
 	"github.com/athosbes/invenire/internal/server/store"
 	"github.com/athosbes/invenire/internal/wire"
 	"github.com/athosbes/invenire/pkg/snapshot"
@@ -93,6 +94,14 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return errorf(http.StatusBadRequest, "%s", err)
 		}
+		// Um ativo, um agente: o cadastro novo revoga os crachás anteriores. O
+		// fingerprint é declarado por quem se cadastra, então é isto que faz um
+		// cadastro no lugar de outra máquina aparecer (o agente dela para com
+		// 401) em vez de conviver com ela em silêncio.
+		replaced, err := q.RevokeAssetAgents(r.Context(), asset.ID)
+		if err != nil {
+			return err
+		}
 		if _, err := q.CreateAgent(r.Context(), store.CreateAgentParams{
 			ID:              agentID,
 			AssetID:         asset.ID,
@@ -127,7 +136,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if err := appendChange(r.Context(), q, tok.TenantID, "agent_enrolled", &asset.ID, &actor.ID,
-			map[string]any{"agent_id": agentID, "agent_version": req.AgentVersion, "token_id": tok.ID}); err != nil {
+			map[string]any{"agent_id": agentID, "agent_version": req.AgentVersion, "token_id": tok.ID, "revoked_agents": replaced}); err != nil {
 			return err
 		}
 		if movedTo != nil {
@@ -148,6 +157,61 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.InfoContext(r.Context(), "agente cadastrado", "agent_id", resp.AgentID, "asset_id", resp.AssetID, "hostname", req.Host.Hostname)
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+const maxRenewBody = 16 << 10
+
+// renewAgent: POST /v1/agent/renew. O agente, autenticado com o crachá que
+// tem, manda um CSR e recebe um crachá novo da CA que assina hoje para o
+// tenant. O crachá com que ele se apresentou continua valendo até vencer,
+// para uma resposta perdida no caminho não o deixar de fora.
+func (s *Server) renewAgent(w http.ResponseWriter, r *http.Request) {
+	agent := agentFrom(r.Context())
+	var req wire.RenewRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRenewBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "corpo inválido: "+err.Error())
+		return
+	}
+	presented := pki.Fingerprint(r.TLS.PeerCertificates[0].Raw)
+
+	var resp wire.RenewResponse
+	err := s.inTx(r.Context(), func(q *store.Queries) error {
+		asset, err := q.GetAsset(r.Context(), agent.AssetID)
+		if err != nil {
+			return err
+		}
+		ca, caID, err := s.signingCA(r.Context(), q, asset.TenantID)
+		if err != nil {
+			return err
+		}
+		certPEM, certFP, err := ca.SignAgentCSR([]byte(req.CSR), agent.ID.String())
+		if err != nil {
+			return errorf(http.StatusBadRequest, "%s", err)
+		}
+		if _, err := q.RenewAgentCert(r.Context(), store.RenewAgentCertParams{
+			ID: agent.ID, Presented: presented, CertFingerprint: certFP, TenantCaID: &caID,
+		}); errors.Is(err, pgx.ErrNoRows) {
+			// Revogado, ou outra renovação trocou o crachá, entre o agentAuth e aqui.
+			return errorf(http.StatusUnauthorized, "agente desconhecido ou revogado")
+		} else if err != nil {
+			return err
+		}
+		actor, err := q.EnsureSystemActor(r.Context(), store.EnsureSystemActorParams{TenantID: asset.TenantID, Name: "pki"})
+		if err != nil {
+			return err
+		}
+		resp.Certificate = string(certPEM)
+		return appendChange(r.Context(), q, asset.TenantID, "agent_cert_renewed", &asset.ID, &actor.ID,
+			map[string]any{"agent_id": agent.ID, "tenant_ca_id": caID, "fingerprint": certFP, "previous_fingerprint": presented})
+	})
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.log.InfoContext(r.Context(), "crachá renovado", "agent_id", agent.ID)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func appendChange(ctx context.Context, q *store.Queries, tenantID uuid.UUID, kind string, assetID, actorID *uuid.UUID, data any) error {

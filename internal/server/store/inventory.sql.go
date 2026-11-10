@@ -37,7 +37,7 @@ func (q *Queries) ConsumeEnrollmentToken(ctx context.Context, tokenHash []byte) 
 const createAgent = `-- name: CreateAgent :one
 INSERT INTO agent (id, asset_id, cert_fingerprint, agent_version, tenant_ca_id)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, asset_id, cert_fingerprint, agent_version, enrolled_at, last_seen_at, revoked_at, tenant_ca_id
+RETURNING id, asset_id, cert_fingerprint, agent_version, enrolled_at, last_seen_at, revoked_at, tenant_ca_id, prev_cert_fingerprint, prev_tenant_ca_id
 `
 
 type CreateAgentParams struct {
@@ -67,6 +67,8 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.LastSeenAt,
 		&i.RevokedAt,
 		&i.TenantCaID,
+		&i.PrevCertFingerprint,
+		&i.PrevTenantCaID,
 	)
 	return i, err
 }
@@ -119,7 +121,7 @@ func (q *Queries) CreateTenant(ctx context.Context, name string) (Tenant, error)
 }
 
 const getActiveAgentByCert = `-- name: GetActiveAgentByCert :one
-SELECT id, asset_id, cert_fingerprint, agent_version, enrolled_at, last_seen_at, revoked_at, tenant_ca_id FROM agent WHERE cert_fingerprint = $1 AND revoked_at IS NULL
+SELECT id, asset_id, cert_fingerprint, agent_version, enrolled_at, last_seen_at, revoked_at, tenant_ca_id, prev_cert_fingerprint, prev_tenant_ca_id FROM agent WHERE cert_fingerprint = $1 AND revoked_at IS NULL
 `
 
 // Usado na autenticação mTLS: agente revogado não é encontrado.
@@ -135,6 +137,8 @@ func (q *Queries) GetActiveAgentByCert(ctx context.Context, certFingerprint stri
 		&i.LastSeenAt,
 		&i.RevokedAt,
 		&i.TenantCaID,
+		&i.PrevCertFingerprint,
+		&i.PrevTenantCaID,
 	)
 	return i, err
 }
@@ -267,6 +271,21 @@ UPDATE agent SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL
 func (q *Queries) RevokeAgent(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, revokeAgent, id)
 	return err
+}
+
+const revokeAssetAgents = `-- name: RevokeAssetAgents :execrows
+UPDATE agent SET revoked_at = now() WHERE asset_id = $1 AND revoked_at IS NULL
+`
+
+// No recadastro: os crachás anteriores do ativo deixam de valer. Sem isso,
+// quem recadastra uma máquina (ou se passa por ela com um token) conviveria
+// com o agente antigo sem ninguém notar.
+func (q *Queries) RevokeAssetAgents(ctx context.Context, assetID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeAssetAgents, assetID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const touchAgent = `-- name: TouchAgent :exec

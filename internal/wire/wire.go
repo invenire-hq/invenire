@@ -16,7 +16,19 @@ const (
 	// PathAgent devolve quem o crachá apresentado é, para o agente conferir
 	// se um servidor novo o reconhece (set-server).
 	PathAgent = "/v1/agent"
+	// PathAgentRenew troca o crachá do agente por um novo, antes de vencer.
+	PathAgentRenew = "/v1/agent/renew"
 )
+
+// RenewRequest é o corpo de POST /v1/agent/renew.
+type RenewRequest struct {
+	CSR string `json:"csr"` // PEM, CERTIFICATE REQUEST
+}
+
+// RenewResponse devolve o crachá novo, assinado pela CA do tenant.
+type RenewResponse struct {
+	Certificate string `json:"certificate"`
+}
 
 // SHA256Header leva o SHA-256 (hex) do snapshot descomprimido, exatamente
 // como snapshot.Marshal o calculou.

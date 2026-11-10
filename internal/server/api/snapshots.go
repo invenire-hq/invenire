@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -21,6 +23,12 @@ import (
 const (
 	maxSnapshotWire = 32 << 20  // corpo como chega, em gzip
 	maxSnapshotBody = 128 << 20 // depois de descomprimido
+
+	// maxClockAhead é quanto o collected_at pode estar à frente do relógio do
+	// servidor. A ingestão ordena por collected_at: um snapshot datado do
+	// futuro faria todos os seguintes do ativo chegarem "fora de ordem", e o
+	// estado dele nunca mais mudaria. Um dia cobre fuso mal configurado.
+	maxClockAhead = 24 * time.Hour
 )
 
 func compileSnapshotSchema() (*jsonschema.Schema, error) {
@@ -53,6 +61,13 @@ func (s *Server) postSnapshot(w http.ResponseWriter, r *http.Request) {
 	snap, err := s.validate(body)
 	if err != nil {
 		s.fail(w, r, err)
+		return
+	}
+	// 422: o agente tira o snapshot da fila (rejected/) em vez de reenviar.
+	if ahead := time.Until(snap.CollectedAt); ahead > maxClockAhead {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf(
+			"collected_at (%s) está %s à frente do servidor: confira o relógio da máquina",
+			snap.CollectedAt.UTC().Format(time.RFC3339), ahead.Round(time.Minute)))
 		return
 	}
 	if snap.AgentID != "" && snap.AgentID != agent.ID.String() {

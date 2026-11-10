@@ -19,6 +19,7 @@ A arquitetura e o modelo de dados estão no documento
 - [x] CA independente por tenant (crachás dos agentes), chave cifrada com a chave-mestra; servidor conferido por pin ou certificado público; `invenire-agent set-server`
 - [x] Produtos e mapeamentos manuais por tenant (`tenant_software_map`), separados do catálogo comum das regras
 - [x] Unidades em árvore livre (`org_unit`), etiquetas (`asset_label`), token de cadastro com unidade (`token create --unit`)
+- [x] Renovação automática do crachá, recadastro que revoga o agente anterior e recusa de snapshot com data no futuro
 
 ## Do zero à primeira máquina
 
@@ -106,6 +107,8 @@ curl.exe -k -H "Authorization: Bearer inva_COLE_O_TOKEN" https://localhost:8443/
 | `servidor respondeu 401: token de cadastro inválido` | token já gasto, vencido ou incompleto | `token create` de novo |
 | `rode como administrador` | terminal sem elevação | abra o PowerShell como administrador |
 | `o agente não está cadastrado` | `service install` antes do `enroll` | faça o passo 4 |
+| `collected_at … à frente do servidor` (em `queue/rejected/`) | o relógio da máquina está mais de 24h adiantado | acerte o relógio; a próxima coleta entra |
+| `o servidor recusou o certificado do agente` | agente revogado, ou a máquina foi cadastrada de novo (cada cadastro revoga o anterior) | `enroll --force` com um token novo |
 
 ## Agente
 
@@ -151,6 +154,11 @@ A fila guarda até 100 snapshots (`--max-queue`) com os bytes exatos que serão 
 de cada arquivo traz o SHA-256, conferido antes do envio. O que o servidor recusa de vez vai para
 `queue/rejected/` com o motivo. Se o certificado for revogado, `run` para com o código de saída
 3 e a fila fica intacta.
+
+O crachá vale dois anos e o agente o renova sozinho quando faltam oito meses
+(`POST /v1/agent/renew`), com a mesma chave. Se a renovação falhar, o crachá atual continua em
+uso e a coleta seguinte tenta de novo. Só uma máquina que ficou desligada até o crachá vencer
+precisa de um `enroll --force`.
 
 ### Como serviço
 
@@ -228,7 +236,8 @@ certificado público, não há pin.
 |---|---|---|
 | `POST /v1/enroll` | token de cadastro | recebe CSR e dados do host; devolve o crachá, assinado pela CA do tenant, e a CA da instalação (vazia com certificado público) |
 | `GET /v1/agent` | crachá de agente | diz de qual agente e ativo é o crachá; o `set-server` usa para conferir o servidor novo |
-| `POST /v1/snapshots` | crachá de agente não revogado, conferido contra a CA do tenant que o emitiu | recebe o snapshot (gzip opcional) com o SHA-256 no cabeçalho `Invenire-Snapshot-SHA256`; 202 se novo, 200 se repetido |
+| `POST /v1/agent/renew` | crachá de agente | recebe um CSR e devolve um crachá novo, da CA que assina hoje para o tenant; o crachá apresentado continua aceito até vencer |
+| `POST /v1/snapshots` | crachá de agente não revogado, conferido contra a CA do tenant que o emitiu | recebe o snapshot (gzip opcional) com o SHA-256 no cabeçalho `Invenire-Snapshot-SHA256`; 202 se novo, 200 se repetido; 422 se o `collected_at` estiver mais de 24h à frente do servidor |
 | `GET /v1/software/unmapped` | token de API, escopo `read` | nomes sem produto nos ativos do tenant, dos mais comuns para os menos, com o palpite das regras (`?source=`, `?limit=`, `?cursor=`) |
 | `PUT /v1/software/raw/{id}` | token de API, escopo `admin` | mapeamento manual do tenant: `{"vendor": "…", "product": "…"}`; devolve `product_scope` (`catalog` ou `tenant`) |
 | `DELETE /v1/software/raw/{id}` | token de API, escopo `admin` | desfaz o mapeamento manual do tenant |
@@ -241,6 +250,11 @@ certificado público, não há pin.
 | `PUT /v1/assets/{id}/labels/{chave}` | token de API, escopo `admin` | cria ou troca a etiqueta: `{"value": "produção"}` |
 | `DELETE /v1/assets/{id}/labels/{chave}` | token de API, escopo `admin` | remove a etiqueta |
 | `GET /healthz` | nenhuma | 204 se o banco responde |
+
+Cada ativo tem um agente: cadastrar de novo a mesma máquina revoga o agente anterior, e o
+`agent_enrolled` do `change_log` traz quantos foram revogados (`revoked_agents`). O fingerprint
+é declarado por quem se cadastra; se alguém usar um token para se passar por outra máquina, o
+agente dela para com 401 em vez de os dois conviverem.
 
 Revogar um agente é preencher `agent.revoked_at`; a próxima requisição dele recebe 401. Revogar
 a CA de um tenant (`tenant_ca.revoked_at`) derruba todos os crachás dela de uma vez; o cadastro
