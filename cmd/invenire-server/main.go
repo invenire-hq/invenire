@@ -2,7 +2,8 @@
 //
 //	invenire-server serve
 //	invenire-server tenant create <nome>
-//	invenire-server token create --tenant <nome>
+//	invenire-server token create --tenant <nome> [--unit Saúde/UBS Centro]
+//	invenire-server unit create --tenant <nome> [--parent Saúde] [--kind setor] <nome>
 //
 // A conexão com o PostgreSQL vem de INVENIRE_DATABASE_URL.
 package main
@@ -26,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -46,7 +48,12 @@ func usage() {
 comandos:
   serve                       aplica as migrações e sobe a API (HTTPS com mTLS)
   tenant create <nome>        cria um tenant
-  token create --tenant <n>   cria um token de cadastro de agente, de uso único
+  token create --tenant <n> [--unit <caminho>]
+                              cria um token de cadastro de agente, de uso único;
+                              com --unit, a máquina já entra nessa unidade
+  unit create --tenant <n> [--parent <caminho>] [--kind <tipo>] <nome>
+                              cria uma unidade (secretaria, site, setor…)
+  unit list --tenant <n>      mostra a árvore de unidades do tenant
   actor create --tenant <n> --name <nome> --scopes read,admin
                               cria um usuário ou pipeline e um token de API para ele
   version                     mostra a versão
@@ -71,6 +78,10 @@ func main() {
 		err = runTenantCreate(ctx, os.Args[3:])
 	case cmd == "token create":
 		err = runTokenCreate(ctx, os.Args[3:])
+	case cmd == "unit create":
+		err = runUnitCreate(ctx, os.Args[3:])
+	case cmd == "unit list":
+		err = runUnitList(ctx, os.Args[3:])
 	case cmd == "actor create":
 		err = runActorCreate(ctx, os.Args[3:])
 	case os.Args[1] == "version" || os.Args[1] == "--version":
@@ -271,6 +282,7 @@ func runTokenCreate(ctx context.Context, args []string) error {
 	tenant := fs.String("tenant", "", "nome do tenant (obrigatório)")
 	ttl := fs.Duration("ttl", 24*time.Hour, "validade do token")
 	desc := fs.String("description", "", "para que ou para quem é o token")
+	unit := fs.String("unit", "", "caminho da unidade onde a máquina entra, ex.: Saúde/UBS Centro")
 	dataDir := fs.String("data", "data", "diretório de dados do servidor, para mostrar o pin da CA")
 	fs.Parse(args)
 	if *tenant == "" {
@@ -287,11 +299,22 @@ func runTokenCreate(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("tenant %q: %w", *tenant, err)
 	}
-	token, expires, err := api.NewEnrollmentToken(ctx, q, t.ID, *desc, *ttl)
+	var unitID *uuid.UUID
+	if *unit != "" {
+		u, err := api.ResolveUnitPath(ctx, q, t.ID, *unit)
+		if err != nil {
+			return fmt.Errorf("%w (veja: invenire-server unit list --tenant %q)", err, *tenant)
+		}
+		unitID = &u.ID
+	}
+	token, expires, err := api.NewEnrollmentToken(ctx, q, t.ID, unitID, *desc, *ttl)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("token:   %s\nexpira:  %s\n", token, expires.Format(time.RFC3339))
+	if unitID != nil {
+		fmt.Printf("unidade: %s\n", strings.Trim(*unit, "/"))
+	}
 	if m, _ := os.ReadFile(filepath.Join(*dataDir, tlsModeFile)); strings.TrimSpace(string(m)) == "public" {
 		fmt.Println("ca pin:  nenhum (o servidor usa certificado público: rode o enroll sem --ca-pin)")
 		return nil
@@ -304,6 +327,94 @@ func runTokenCreate(ctx context.Context, args []string) error {
 		}
 	} else {
 		fmt.Fprintf(os.Stderr, "aviso: sem pin da CA (%v); o agente terá de confiar no servidor no primeiro contato\n", err)
+	}
+	return nil
+}
+
+func runUnitCreate(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("unit create", flag.ExitOnError)
+	tenant := fs.String("tenant", "", "nome do tenant (obrigatório)")
+	parent := fs.String("parent", "", "caminho da unidade-mãe, ex.: Saúde/UBS Centro; vazio = raiz")
+	kind := fs.String("kind", "", "tipo da camada, livre: secretaria, site, setor…")
+	fs.Parse(args)
+	if *tenant == "" || fs.NArg() != 1 {
+		return errors.New("uso: invenire-server unit create --tenant <nome> [--parent <caminho>] [--kind <tipo>] <nome>")
+	}
+	if err := migrate(ctx); err != nil {
+		return fmt.Errorf("migrações: %w", err)
+	}
+	pool, err := connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	q := store.New(tx)
+	t, err := q.GetTenantByName(ctx, *tenant)
+	if err != nil {
+		return fmt.Errorf("tenant %q: %w", *tenant, err)
+	}
+	var parentID *uuid.UUID
+	if *parent != "" {
+		p, err := api.ResolveUnitPath(ctx, q, t.ID, *parent)
+		if err != nil {
+			return err
+		}
+		parentID = &p.ID
+	}
+	u, _, err := api.CreateUnit(ctx, q, t.ID, nil, parentID, *kind, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	path := fs.Arg(0)
+	if *parent != "" {
+		path = strings.Trim(*parent, "/") + "/" + path
+	}
+	fmt.Printf("unidade: %s\ncaminho: %s\n", u.ID, path)
+	return nil
+}
+
+func runUnitList(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("unit list", flag.ExitOnError)
+	tenant := fs.String("tenant", "", "nome do tenant (obrigatório)")
+	fs.Parse(args)
+	if *tenant == "" {
+		return errors.New("--tenant é obrigatório")
+	}
+	if err := migrate(ctx); err != nil {
+		return fmt.Errorf("migrações: %w", err)
+	}
+	pool, err := connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	q := store.New(pool)
+	t, err := q.GetTenantByName(ctx, *tenant)
+	if err != nil {
+		return fmt.Errorf("tenant %q: %w", *tenant, err)
+	}
+	rows, err := q.ListUnits(ctx, t.ID)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		fmt.Fprintln(os.Stderr, "nenhuma unidade; crie com: invenire-server unit create --tenant", *tenant, "<nome>")
+		return nil
+	}
+	for _, u := range rows {
+		kind := ""
+		if u.Kind != "" {
+			kind = " (" + u.Kind + ")"
+		}
+		fmt.Printf("%s%s%s  %d ativo(s)  %s\n", strings.Repeat("  ", int(u.Depth)), u.Name, kind, u.AssetCount, u.ID)
 	}
 	return nil
 }

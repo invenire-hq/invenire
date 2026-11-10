@@ -30,7 +30,7 @@ func (q *Queries) AddAssetRaws(ctx context.Context, arg AddAssetRawsParams) erro
 }
 
 const claimRemapAsset = `-- name: ClaimRemapAsset :one
-SELECT id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at, remap_pending FROM asset WHERE remap_pending
+SELECT id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at, remap_pending, unit_id FROM asset WHERE remap_pending
 ORDER BY id
 LIMIT 1
 FOR UPDATE SKIP LOCKED
@@ -55,6 +55,7 @@ func (q *Queries) ClaimRemapAsset(ctx context.Context) (Asset, error) {
 		&i.FirstSeenAt,
 		&i.LastSeenAt,
 		&i.RemapPending,
+		&i.UnitID,
 	)
 	return i, err
 }

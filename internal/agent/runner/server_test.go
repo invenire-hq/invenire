@@ -79,7 +79,7 @@ func TestSystemTrustAndSetServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tok, _, err := api.NewEnrollmentToken(ctx, q, tenant.ID, "", time.Hour)
+	tok, _, err := api.NewEnrollmentToken(ctx, q, tenant.ID, nil, "", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

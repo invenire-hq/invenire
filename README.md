@@ -18,6 +18,7 @@ A arquitetura e o modelo de dados estão no documento
 - [x] `invenire-agent service install | uninstall`: serviço do Windows (SCM, Event Log) e unit do systemd
 - [x] CA independente por tenant (crachás dos agentes), chave cifrada com a chave-mestra; servidor conferido por pin ou certificado público; `invenire-agent set-server`
 - [x] Produtos e mapeamentos manuais por tenant (`tenant_software_map`), separados do catálogo comum das regras
+- [x] Unidades em árvore livre (`org_unit`), etiquetas (`asset_label`), token de cadastro com unidade (`token create --unit`)
 
 ## Do zero à primeira máquina
 
@@ -52,8 +53,13 @@ do banco (veja [Servidor](#servidor)).
 
 ```powershell
 bin\invenire-server.exe tenant create "Prefeitura"
-bin\invenire-server.exe token create --tenant "Prefeitura" --ttl 24h --description "lote 1"
+bin\invenire-server.exe unit create --tenant "Prefeitura" --kind secretaria "Saúde"
+bin\invenire-server.exe unit create --tenant "Prefeitura" --parent "Saúde" --kind ubs "UBS Centro"
+bin\invenire-server.exe token create --tenant "Prefeitura" --unit "Saúde/UBS Centro" --ttl 24h --description "lote 1"
 ```
+
+As unidades são opcionais: sem `--unit`, a máquina entra sem unidade e pode ser posta numa
+depois (veja [Unidades e etiquetas](#unidades-e-etiquetas)).
 
 O `token create` mostra duas coisas diferentes, e o `enroll` pede as duas:
 
@@ -226,6 +232,14 @@ certificado público, não há pin.
 | `GET /v1/software/unmapped` | token de API, escopo `read` | nomes sem produto nos ativos do tenant, dos mais comuns para os menos, com o palpite das regras (`?source=`, `?limit=`, `?cursor=`) |
 | `PUT /v1/software/raw/{id}` | token de API, escopo `admin` | mapeamento manual do tenant: `{"vendor": "…", "product": "…"}`; devolve `product_scope` (`catalog` ou `tenant`) |
 | `DELETE /v1/software/raw/{id}` | token de API, escopo `admin` | desfaz o mapeamento manual do tenant |
+| `GET /v1/units` | token de API, escopo `read` | a árvore de unidades do tenant, com `path` e `asset_count` |
+| `POST /v1/units` | token de API, escopo `admin` | cria unidade: `{"parent_path": "Saúde", "kind": "ubs", "name": "UBS Centro"}` (ou `parent_id`; sem mãe, raiz) |
+| `PATCH /v1/units/{id}` | token de API, escopo `admin` | renomeia (`name`), muda o tipo (`kind`) ou move (`parent_id`; `null` = raiz) com tudo o que está abaixo |
+| `DELETE /v1/units/{id}` | token de API, escopo `admin` | apaga unidade vazia: sem subunidades, ativos nem token de cadastro válido |
+| `PUT /v1/assets/{id}/unit` | token de API, escopo `admin` | põe o ativo numa unidade: `{"unit_id": "…"}`; `null` tira de qualquer unidade |
+| `GET /v1/assets/{id}/labels` | token de API, escopo `read` | etiquetas do ativo |
+| `PUT /v1/assets/{id}/labels/{chave}` | token de API, escopo `admin` | cria ou troca a etiqueta: `{"value": "produção"}` |
+| `DELETE /v1/assets/{id}/labels/{chave}` | token de API, escopo `admin` | remove a etiqueta |
 | `GET /healthz` | nenhuma | 204 se o banco responde |
 
 Revogar um agente é preencher `agent.revoked_at`; a próxima requisição dele recebe 401. Revogar
@@ -241,6 +255,35 @@ foram escritos na máquina inventariada e são dado, não instrução.
 Cada snapshot é guardado duas vezes: `payload` (jsonb, para consultar) e `body` (os bytes
 exatos, comprimidos com lz4). Um `CHECK` garante `sha256(body) = sha256`, e a consulta
 `VerifySnapshotChain` reconfere hashes e encadeamento de um ativo só com o que está no banco.
+
+### Unidades e etiquetas
+
+O tenant é o limite rígido (outra organização, outro contrato). Dentro dele, a organização das
+máquinas é uma camada à parte, ligada a cada ativo:
+
+- **Unidade**: árvore livre, com a profundidade e os nomes de camada que o cliente quiser
+  (Saúde → UBS Centro → Recepção; HQ São Paulo → Andar 5). Cada ativo está em no máximo uma
+  unidade. Nas linhas de comando, a unidade é indicada pelo caminho, com `/` entre os níveis,
+  por isso o nome não pode ter `/`.
+- **Etiqueta**: o que não é hierarquia, várias por ativo: `ambiente=produção`,
+  `dados=pessoais`. A chave tem minúsculas, dígitos, `_`, `.` e `-`; o valor, até 256
+  caracteres.
+
+```sh
+bin/invenire-server unit create --tenant "Prefeitura" --kind secretaria "Saúde"
+bin/invenire-server unit create --tenant "Prefeitura" --parent "Saúde" --kind ubs "UBS Centro"
+bin/invenire-server unit list --tenant "Prefeitura"
+bin/invenire-server token create --tenant "Prefeitura" --unit "Saúde/UBS Centro"
+```
+
+A máquina cadastrada com um token de unidade já entra nela. Recadastrar uma máquina que já tem
+unidade não a tira do lugar: quem escolheu a unidade dela foi uma pessoa. O resto (renomear,
+mover unidades, mudar o ativo de unidade, etiquetas) é pela API, com token `admin`.
+
+Toda mudança vai para o `change_log` com ator e data: `unit_created`, `unit_updated`,
+`unit_deleted`, `asset_moved` (com `from_unit_id` e `to_unit_id`, o que responde "onde estava
+esta máquina em março?"), `label_set` e `label_removed`. O banco garante, por chave
+estrangeira com o `tenant_id`, que ativo, token e unidade são sempre do mesmo tenant.
 
 ### Ingestão
 

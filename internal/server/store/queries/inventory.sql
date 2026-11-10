@@ -37,14 +37,14 @@ RETURNING *;
 SELECT * FROM agent WHERE cert_fingerprint = $1 AND revoked_at IS NULL;
 
 -- name: CreateEnrollmentToken :one
-INSERT INTO enrollment_token (tenant_id, token_hash, description, created_by, expires_at)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO enrollment_token (tenant_id, token_hash, description, created_by, expires_at, unit_id)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, expires_at;
 
 -- name: ConsumeEnrollmentToken :one
 -- Reserva o token na transação do enrollment. FOR UPDATE impede que dois
 -- cadastros simultâneos usem o mesmo token; MarkEnrollmentTokenUsed fecha.
-SELECT id, tenant_id FROM enrollment_token
+SELECT id, tenant_id, unit_id FROM enrollment_token
 WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
 FOR UPDATE;
 

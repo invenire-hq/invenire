@@ -58,6 +58,15 @@ type Asset struct {
 	FirstSeenAt  time.Time
 	LastSeenAt   time.Time
 	RemapPending bool
+	UnitID       *uuid.UUID
+}
+
+type AssetLabel struct {
+	AssetID uuid.UUID
+	Key     string
+	Value   string
+	SetBy   *uuid.UUID
+	SetAt   time.Time
 }
 
 type AssetSoftwareRaw struct {
@@ -85,6 +94,7 @@ type EnrollmentToken struct {
 	ExpiresAt   time.Time
 	UsedAt      *time.Time
 	UsedBy      *uuid.UUID
+	UnitID      *uuid.UUID
 }
 
 type Installation struct {
@@ -96,6 +106,16 @@ type Installation struct {
 	LastSnapshotID    uuid.UUID
 	RemovedAt         *time.Time
 	RemovedSnapshotID *uuid.UUID
+}
+
+type OrgUnit struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	ParentID  *uuid.UUID
+	Kind      string
+	Name      string
+	Source    string
+	CreatedAt time.Time
 }
 
 type Proposal struct {

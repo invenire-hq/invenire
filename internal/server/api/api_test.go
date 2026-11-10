@@ -73,7 +73,7 @@ func newEnv(t *testing.T) *env {
 }
 
 func (e *env) token() string {
-	tok, _, err := api.NewEnrollmentToken(context.Background(), e.q, e.tenant.ID, "teste", time.Hour)
+	tok, _, err := api.NewEnrollmentToken(context.Background(), e.q, e.tenant.ID, nil, "teste", time.Hour)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -344,7 +344,7 @@ func TestTenantCAs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherTok, _, err := api.NewEnrollmentToken(ctx, e.q, other.ID, "", time.Hour)
+	otherTok, _, err := api.NewEnrollmentToken(ctx, e.q, other.ID, nil, "", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

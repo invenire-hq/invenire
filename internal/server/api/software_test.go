@@ -180,7 +180,7 @@ func TestMappingIsPerTenant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherTok, _, err := api.NewEnrollmentToken(ctx, e.q, other.ID, "", time.Hour)
+	otherTok, _, err := api.NewEnrollmentToken(ctx, e.q, other.ID, nil, "", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

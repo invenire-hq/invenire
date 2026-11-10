@@ -20,8 +20,9 @@ import (
 )
 
 // NewEnrollmentToken cria um token de cadastro de uso único. O valor só
-// existe na resposta: o banco guarda o SHA-256.
-func NewEnrollmentToken(ctx context.Context, q *store.Queries, tenantID uuid.UUID, description string, ttl time.Duration) (token string, expires time.Time, err error) {
+// existe na resposta: o banco guarda o SHA-256. unitID, se não for nulo, é a
+// unidade (do mesmo tenant) onde a máquina cadastrada entra.
+func NewEnrollmentToken(ctx context.Context, q *store.Queries, tenantID uuid.UUID, unitID *uuid.UUID, description string, ttl time.Duration) (token string, expires time.Time, err error) {
 	b := make([]byte, 32)
 	rand.Read(b)
 	token = wire.TokenPrefix + base64.RawURLEncoding.EncodeToString(b)
@@ -31,6 +32,7 @@ func NewEnrollmentToken(ctx context.Context, q *store.Queries, tenantID uuid.UUI
 		TokenHash:   h[:],
 		Description: description,
 		ExpiresAt:   time.Now().Add(ttl),
+		UnitID:      unitID,
 	})
 	return token, row.ExpiresAt, err
 }
@@ -100,6 +102,16 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			return err
 		}
+		// A unidade do token só vale para ativo sem unidade: recadastrar não
+		// tira a máquina do lugar que alguém escolheu.
+		var movedTo *uuid.UUID
+		if tok.UnitID != nil {
+			if _, err := q.SetAssetUnitIfNone(r.Context(), store.SetAssetUnitIfNoneParams{ID: asset.ID, UnitID: tok.UnitID}); err == nil {
+				movedTo = tok.UnitID
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
 		if err := q.MarkEnrollmentTokenUsed(r.Context(), store.MarkEnrollmentTokenUsedParams{ID: tok.ID, UsedBy: &agentID}); err != nil {
 			return err
 		}
@@ -117,6 +129,11 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		if err := appendChange(r.Context(), q, tok.TenantID, "agent_enrolled", &asset.ID, &actor.ID,
 			map[string]any{"agent_id": agentID, "agent_version": req.AgentVersion, "token_id": tok.ID}); err != nil {
 			return err
+		}
+		if movedTo != nil {
+			if _, err := appendAssetMoved(r.Context(), q, tok.TenantID, asset.ID, &actor.ID, nil, movedTo); err != nil {
+				return err
+			}
 		}
 
 		resp = wire.EnrollResponse{AgentID: agentID, AssetID: asset.ID, Certificate: string(certPEM)}

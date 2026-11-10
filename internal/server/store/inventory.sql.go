@@ -14,7 +14,7 @@ import (
 )
 
 const consumeEnrollmentToken = `-- name: ConsumeEnrollmentToken :one
-SELECT id, tenant_id FROM enrollment_token
+SELECT id, tenant_id, unit_id FROM enrollment_token
 WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
 FOR UPDATE
 `
@@ -22,6 +22,7 @@ FOR UPDATE
 type ConsumeEnrollmentTokenRow struct {
 	ID       uuid.UUID
 	TenantID uuid.UUID
+	UnitID   *uuid.UUID
 }
 
 // Reserva o token na transação do enrollment. FOR UPDATE impede que dois
@@ -29,7 +30,7 @@ type ConsumeEnrollmentTokenRow struct {
 func (q *Queries) ConsumeEnrollmentToken(ctx context.Context, tokenHash []byte) (ConsumeEnrollmentTokenRow, error) {
 	row := q.db.QueryRow(ctx, consumeEnrollmentToken, tokenHash)
 	var i ConsumeEnrollmentTokenRow
-	err := row.Scan(&i.ID, &i.TenantID)
+	err := row.Scan(&i.ID, &i.TenantID, &i.UnitID)
 	return i, err
 }
 
@@ -71,8 +72,8 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 }
 
 const createEnrollmentToken = `-- name: CreateEnrollmentToken :one
-INSERT INTO enrollment_token (tenant_id, token_hash, description, created_by, expires_at)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO enrollment_token (tenant_id, token_hash, description, created_by, expires_at, unit_id)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, expires_at
 `
 
@@ -82,6 +83,7 @@ type CreateEnrollmentTokenParams struct {
 	Description string
 	CreatedBy   *uuid.UUID
 	ExpiresAt   time.Time
+	UnitID      *uuid.UUID
 }
 
 type CreateEnrollmentTokenRow struct {
@@ -96,6 +98,7 @@ func (q *Queries) CreateEnrollmentToken(ctx context.Context, arg CreateEnrollmen
 		arg.Description,
 		arg.CreatedBy,
 		arg.ExpiresAt,
+		arg.UnitID,
 	)
 	var i CreateEnrollmentTokenRow
 	err := row.Scan(&i.ID, &i.ExpiresAt)
@@ -137,7 +140,7 @@ func (q *Queries) GetActiveAgentByCert(ctx context.Context, certFingerprint stri
 }
 
 const getAsset = `-- name: GetAsset :one
-SELECT id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at, remap_pending FROM asset WHERE id = $1
+SELECT id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at, remap_pending, unit_id FROM asset WHERE id = $1
 `
 
 func (q *Queries) GetAsset(ctx context.Context, id uuid.UUID) (Asset, error) {
@@ -159,6 +162,7 @@ func (q *Queries) GetAsset(ctx context.Context, id uuid.UUID) (Asset, error) {
 		&i.FirstSeenAt,
 		&i.LastSeenAt,
 		&i.RemapPending,
+		&i.UnitID,
 	)
 	return i, err
 }
@@ -292,7 +296,7 @@ ON CONFLICT (tenant_id, fingerprint) DO UPDATE SET
   os_name      = EXCLUDED.os_name,
   os_version   = EXCLUDED.os_version,
   last_seen_at = now()
-RETURNING id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at, remap_pending, (xmax = 0)::boolean AS inserted
+RETURNING id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at, remap_pending, unit_id, (xmax = 0)::boolean AS inserted
 `
 
 type UpsertAssetParams struct {
@@ -323,6 +327,7 @@ type UpsertAssetRow struct {
 	FirstSeenAt  time.Time
 	LastSeenAt   time.Time
 	RemapPending bool
+	UnitID       *uuid.UUID
 	Inserted     bool
 }
 
@@ -357,6 +362,7 @@ func (q *Queries) UpsertAsset(ctx context.Context, arg UpsertAssetParams) (Upser
 		&i.FirstSeenAt,
 		&i.LastSeenAt,
 		&i.RemapPending,
+		&i.UnitID,
 		&i.Inserted,
 	)
 	return i, err

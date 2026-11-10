@@ -249,7 +249,7 @@ func (q *Queries) ListInstallationsWithSoftware(ctx context.Context, assetID uui
 }
 
 const lockAsset = `-- name: LockAsset :one
-SELECT id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at, remap_pending FROM asset WHERE id = $1 FOR UPDATE
+SELECT id, tenant_id, fingerprint, kind, hostname, serial, manufacturer, model, os_family, os_name, os_version, criticality, first_seen_at, last_seen_at, remap_pending, unit_id FROM asset WHERE id = $1 FOR UPDATE
 `
 
 // Serializa a ingestão de um mesmo ativo: o diff depende das instalações
@@ -273,6 +273,7 @@ func (q *Queries) LockAsset(ctx context.Context, id uuid.UUID) (Asset, error) {
 		&i.FirstSeenAt,
 		&i.LastSeenAt,
 		&i.RemapPending,
+		&i.UnitID,
 	)
 	return i, err
 }

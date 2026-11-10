@@ -84,6 +84,14 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/software/unmapped", s.userAuth(scopeRead, s.listUnmapped))
 	mux.Handle("PUT /v1/software/raw/{id}", s.userAuth(scopeAdmin, s.mapRaw))
 	mux.Handle("DELETE /v1/software/raw/{id}", s.userAuth(scopeAdmin, s.unmapRaw))
+	mux.Handle("GET /v1/units", s.userAuth(scopeRead, s.listUnits))
+	mux.Handle("POST /v1/units", s.userAuth(scopeAdmin, s.createUnit))
+	mux.Handle("PATCH /v1/units/{id}", s.userAuth(scopeAdmin, s.updateUnit))
+	mux.Handle("DELETE /v1/units/{id}", s.userAuth(scopeAdmin, s.deleteUnit))
+	mux.Handle("PUT /v1/assets/{id}/unit", s.userAuth(scopeAdmin, s.setAssetUnit))
+	mux.Handle("GET /v1/assets/{id}/labels", s.userAuth(scopeRead, s.listLabels))
+	mux.Handle("PUT /v1/assets/{id}/labels/{key}", s.userAuth(scopeAdmin, s.setLabel))
+	mux.Handle("DELETE /v1/assets/{id}/labels/{key}", s.userAuth(scopeAdmin, s.deleteLabel))
 	return mux
 }
 

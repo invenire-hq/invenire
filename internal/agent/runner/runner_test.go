@@ -78,7 +78,7 @@ func newEnv(t *testing.T) *env {
 }
 
 func (e *env) token(t *testing.T) string {
-	tok, _, err := api.NewEnrollmentToken(context.Background(), e.q, e.tenant.ID, "", time.Hour)
+	tok, _, err := api.NewEnrollmentToken(context.Background(), e.q, e.tenant.ID, nil, "", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
