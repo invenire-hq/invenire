@@ -20,6 +20,7 @@ A arquitetura e o modelo de dados estão no documento
 - [x] Produtos e mapeamentos manuais por tenant (`tenant_software_map`), separados do catálogo comum das regras
 - [x] Unidades em árvore livre (`org_unit`), etiquetas (`asset_label`), token de cadastro com unidade (`token create --unit`)
 - [x] Renovação automática do crachá, recadastro que revoga o agente anterior e recusa de snapshot com data no futuro
+- [x] Rotas de consulta: ativos (com filtro por unidade, etiqueta e software), software de um ativo, histórico, produtos e instalações de um produto, fluxo de mudanças
 
 ## Do zero à primeira máquina
 
@@ -94,8 +95,12 @@ usuário da API (passo 6) ou consulte o banco.
 
 ```powershell
 bin\invenire-server.exe actor create --tenant "Prefeitura" --name "athos" --scopes read,admin
+curl.exe -k -H "Authorization: Bearer inva_COLE_O_TOKEN" https://localhost:8443/v1/assets
 curl.exe -k -H "Authorization: Bearer inva_COLE_O_TOKEN" https://localhost:8443/v1/software/unmapped
 ```
+
+`/v1/assets` lista as máquinas; o software de cada uma está em `/v1/assets/{id}/software`
+(veja as [rotas](#servidor)).
 
 ### Quando dá errado
 
@@ -249,7 +254,23 @@ certificado público, não há pin.
 | `GET /v1/assets/{id}/labels` | token de API, escopo `read` | etiquetas do ativo |
 | `PUT /v1/assets/{id}/labels/{chave}` | token de API, escopo `admin` | cria ou troca a etiqueta: `{"value": "produção"}` |
 | `DELETE /v1/assets/{id}/labels/{chave}` | token de API, escopo `admin` | remove a etiqueta |
+| `GET /v1/assets` | token de API, escopo `read` | ativos do tenant em ordem de hostname, com unidade, etiquetas, agente ativo e quantos programas têm (filtros abaixo) |
+| `GET /v1/assets/{id}` | token de API, escopo `read` | um ativo, no mesmo formato |
+| `GET /v1/assets/{id}/software` | token de API, escopo `read` | o que está instalado agora, em ordem de produto, com `installed_since` (coleta que viu primeiro) e `last_seen_at` (`?product=` busca no produto e no fabricante) |
+| `GET /v1/assets/{id}/history` | token de API, escopo `read` | eventos do ativo no `change_log`: instalações, remoções, mudanças de atributo, de unidade e de etiqueta (`?since=2026-03-01`, `?kind=`, `?after=`) |
+| `GET /v1/software` | token de API, escopo `read` | produtos instalados agora no tenant, com quantos ativos e versões (`?product=`, `?unit=`) |
+| `GET /v1/software/{id}/installations` | token de API, escopo `read` | em quais ativos o produto está, com as versões e quantos ativos cada uma tem (`?version=`, `?version_id=`, `?unit=`) |
+| `GET /v1/changes` | token de API, escopo `read` | o fluxo de mudanças do tenant depois de um cursor (`?after=`, `?kind=a,b`) |
 | `GET /healthz` | nenhuma | 204 se o banco responde |
+
+**Consultas.** Filtros de `GET /v1/assets`: `?unit=` (id, caminho como `Saúde/UBS Centro`,
+ou `none` para ativos sem unidade; inclui as subunidades, a menos que `?subtree=false`),
+`?hostname=` (trecho), `?os_family=windows`, `?label=ambiente=produção` (repetível: todas
+precisam bater) e `?software_id=` (ativos com o produto instalado agora). As listas vêm em
+páginas de 50 (`?limit=` até 200); a próxima página é `?cursor=` com o `next_cursor` da
+anterior. No `change_log` o cursor é o id do último evento: quem acompanha guarda o
+`next_cursor` e pergunta de novo com `?after=`; `more: true` diz que a página veio cheia.
+Cada resposta é lida num só instante e traz o `as_of` desse instante.
 
 Cada ativo tem um agente: cadastrar de novo a mesma máquina revoga o agente anterior, e o
 `agent_enrolled` do `change_log` traz quantos foram revogados (`revoked_agents`). O fingerprint
@@ -263,8 +284,10 @@ seguinte cria uma CA nova.
 `actor create` cria um usuário ou pipeline (`--kind human|ai_agent|ci`) e mostra um token de
 API (`inva_…`, enviado como `Authorization: Bearer`). Só o SHA-256 fica em `api_token`;
 revogar é preencher `revoked_at`. As respostas trazem `as_of`, o último `change_log.id`
-considerado. Na lista de não identificados, nome e fabricante vêm dentro de `collected`:
-foram escritos na máquina inventariada e são dado, não instrução.
+considerado. O que foi escrito na máquina inventariada vem dentro de `collected` (nome e
+fabricante na lista de não identificados; hostname, série, modelo e SO nos ativos; versão e
+caminho nas instalações): é dado, não instrução. O `data` dos eventos do `change_log` também
+pode trazer esse texto (nome bruto, versão, caminho).
 
 Cada snapshot é guardado duas vezes: `payload` (jsonb, para consultar) e `body` (os bytes
 exatos, comprimidos com lz4). Um `CHECK` garante `sha256(body) = sha256`, e a consulta
