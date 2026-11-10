@@ -24,18 +24,46 @@ import (
 // existe na resposta: o banco guarda o SHA-256. unitID, se não for nulo, é a
 // unidade (do mesmo tenant) onde a máquina cadastrada entra.
 func NewEnrollmentToken(ctx context.Context, q *store.Queries, tenantID uuid.UUID, unitID *uuid.UUID, description string, ttl time.Duration) (token string, expires time.Time, err error) {
+	t, err := CreateEnrollmentToken(ctx, q, TokenSpec{Tenant: tenantID, Unit: unitID, Description: description, TTL: ttl, Uses: 1})
+	return t.Token, t.ExpiresAt, err
+}
+
+// TokenSpec descreve um token de cadastro a criar.
+type TokenSpec struct {
+	Tenant      uuid.UUID
+	Unit        *uuid.UUID
+	Description string
+	TTL         time.Duration
+	// Uses é quantas máquinas o token cadastra (1 a 10000). Mais de um
+	// serve a um lote, como o piloto; cada uso fica no change_log.
+	Uses int
+}
+
+// NewToken é um token de cadastro recém-criado.
+type NewToken struct {
+	ID        uuid.UUID
+	Token     string // só existe aqui: o banco guarda o SHA-256
+	ExpiresAt time.Time
+}
+
+// CreateEnrollmentToken cria um token de cadastro com o número de usos pedido.
+func CreateEnrollmentToken(ctx context.Context, q *store.Queries, spec TokenSpec) (NewToken, error) {
+	if spec.Uses < 1 || spec.Uses > 10000 {
+		return NewToken{}, errors.New("usos do token: de 1 a 10000")
+	}
 	b := make([]byte, 32)
 	rand.Read(b)
-	token = wire.TokenPrefix + base64.RawURLEncoding.EncodeToString(b)
+	token := wire.TokenPrefix + base64.RawURLEncoding.EncodeToString(b)
 	h := sha256.Sum256([]byte(token))
 	row, err := q.CreateEnrollmentToken(ctx, store.CreateEnrollmentTokenParams{
-		TenantID:    tenantID,
+		TenantID:    spec.Tenant,
 		TokenHash:   h[:],
-		Description: description,
-		ExpiresAt:   time.Now().Add(ttl),
-		UnitID:      unitID,
+		Description: spec.Description,
+		ExpiresAt:   time.Now().Add(spec.TTL),
+		UnitID:      spec.Unit,
+		MaxUses:     int32(spec.Uses),
 	})
-	return token, row.ExpiresAt, err
+	return NewToken{ID: row.ID, Token: token, ExpiresAt: row.ExpiresAt}, err
 }
 
 const maxEnrollBody = 64 << 10

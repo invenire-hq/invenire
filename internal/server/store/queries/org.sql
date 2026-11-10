@@ -44,7 +44,7 @@ SELECT
   (SELECT count(*) FROM org_unit c WHERE c.parent_id = @id)::int AS children,
   (SELECT count(*) FROM asset a WHERE a.unit_id = @id)::int AS assets,
   (SELECT count(*) FROM enrollment_token t
-    WHERE t.unit_id = @id AND t.used_at IS NULL AND t.expires_at > now())::int AS pending_tokens;
+    WHERE t.unit_id = @id AND t.uses < t.max_uses AND t.revoked_at IS NULL AND t.expires_at > now())::int AS pending_tokens;
 
 -- name: DetachUnitTokens :exec
 -- Tokens usados ou vencidos perdem a unidade apagada; o cadastro já

@@ -15,7 +15,7 @@ import (
 
 const consumeEnrollmentToken = `-- name: ConsumeEnrollmentToken :one
 SELECT id, tenant_id, unit_id FROM enrollment_token
-WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
+WHERE token_hash = $1 AND uses < max_uses AND revoked_at IS NULL AND expires_at > now()
 FOR UPDATE
 `
 
@@ -74,8 +74,8 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 }
 
 const createEnrollmentToken = `-- name: CreateEnrollmentToken :one
-INSERT INTO enrollment_token (tenant_id, token_hash, description, created_by, expires_at, unit_id)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO enrollment_token (tenant_id, token_hash, description, created_by, expires_at, unit_id, max_uses)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id, expires_at
 `
 
@@ -86,6 +86,7 @@ type CreateEnrollmentTokenParams struct {
 	CreatedBy   *uuid.UUID
 	ExpiresAt   time.Time
 	UnitID      *uuid.UUID
+	MaxUses     int32
 }
 
 type CreateEnrollmentTokenRow struct {
@@ -101,6 +102,7 @@ func (q *Queries) CreateEnrollmentToken(ctx context.Context, arg CreateEnrollmen
 		arg.CreatedBy,
 		arg.ExpiresAt,
 		arg.UnitID,
+		arg.MaxUses,
 	)
 	var i CreateEnrollmentTokenRow
 	err := row.Scan(&i.ID, &i.ExpiresAt)
@@ -250,8 +252,66 @@ func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) 
 	return i, err
 }
 
+const listEnrollmentTokens = `-- name: ListEnrollmentTokens :many
+SELECT t.id, t.description, t.created_at, t.expires_at, t.used_at, t.uses, t.max_uses, t.revoked_at,
+       u.id AS unit_id
+FROM enrollment_token t LEFT JOIN org_unit u ON u.id = t.unit_id
+WHERE t.tenant_id = $1
+  AND ($2::boolean OR (t.uses < t.max_uses AND t.revoked_at IS NULL AND t.expires_at > now()))
+ORDER BY t.created_at DESC, t.id
+`
+
+type ListEnrollmentTokensParams struct {
+	TenantID   uuid.UUID
+	IncludeAll bool
+}
+
+type ListEnrollmentTokensRow struct {
+	ID          uuid.UUID
+	Description string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	UsedAt      *time.Time
+	Uses        int32
+	MaxUses     int32
+	RevokedAt   *time.Time
+	UnitID      *uuid.UUID
+}
+
+// Tokens do tenant, dos mais novos aos mais velhos; all = incluir os gastos,
+// vencidos e revogados (include_all).
+func (q *Queries) ListEnrollmentTokens(ctx context.Context, arg ListEnrollmentTokensParams) ([]ListEnrollmentTokensRow, error) {
+	rows, err := q.db.Query(ctx, listEnrollmentTokens, arg.TenantID, arg.IncludeAll)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEnrollmentTokensRow
+	for rows.Next() {
+		var i ListEnrollmentTokensRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Description,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.UsedAt,
+			&i.Uses,
+			&i.MaxUses,
+			&i.RevokedAt,
+			&i.UnitID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markEnrollmentTokenUsed = `-- name: MarkEnrollmentTokenUsed :exec
-UPDATE enrollment_token SET used_at = now(), used_by = $2 WHERE id = $1
+UPDATE enrollment_token SET used_at = now(), used_by = $2, uses = uses + 1 WHERE id = $1
 `
 
 type MarkEnrollmentTokenUsedParams struct {
@@ -286,6 +346,30 @@ func (q *Queries) RevokeAssetAgents(ctx context.Context, assetID uuid.UUID) (int
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const revokeEnrollmentToken = `-- name: RevokeEnrollmentToken :one
+UPDATE enrollment_token SET revoked_at = now()
+WHERE id = $1 AND tenant_id = $2 AND revoked_at IS NULL
+RETURNING id, uses, max_uses
+`
+
+type RevokeEnrollmentTokenParams struct {
+	ID       uuid.UUID
+	TenantID uuid.UUID
+}
+
+type RevokeEnrollmentTokenRow struct {
+	ID      uuid.UUID
+	Uses    int32
+	MaxUses int32
+}
+
+func (q *Queries) RevokeEnrollmentToken(ctx context.Context, arg RevokeEnrollmentTokenParams) (RevokeEnrollmentTokenRow, error) {
+	row := q.db.QueryRow(ctx, revokeEnrollmentToken, arg.ID, arg.TenantID)
+	var i RevokeEnrollmentTokenRow
+	err := row.Scan(&i.ID, &i.Uses, &i.MaxUses)
+	return i, err
 }
 
 const touchAgent = `-- name: TouchAgent :exec

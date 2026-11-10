@@ -22,6 +22,15 @@ A arquitetura e o modelo de dados estão no documento
 - [x] Renovação automática do crachá, recadastro que revoga o agente anterior e recusa de snapshot com data no futuro
 - [x] Rotas de consulta: ativos (com filtro por unidade, etiqueta e software), software de um ativo, histórico, produtos e instalações de um produto, fluxo de mudanças
 - [x] Exportação do tenant (`tenant export`, `tenant verify`, `GET /v1/export`) com formato documentado em [docs/exportacao.md](docs/exportacao.md); importação ainda não
+- [x] Pacote do piloto: imagem Docker e compose do servidor, backup e restauração, scripts de instalação do agente, token de vários usos com revogação, `invenire-server status` e `scripts/build.sh` ([docs/piloto.md](docs/piloto.md))
+
+## Piloto
+
+Para instalar de verdade num grupo de máquinas, siga [docs/piloto.md](docs/piloto.md): o
+servidor sobe com Docker (`deploy/piloto`, com backup e restauração), as máquinas instalam com
+`instalar.ps1` ou `instalar.sh` a partir da pasta gerada por `scripts/build.sh`, e o
+`invenire-server status` mostra quem está em dia. A seção abaixo é o caminho manual, para
+desenvolvimento ou para entender cada peça.
 
 ## Do zero à primeira máquina
 
@@ -71,7 +80,9 @@ O `token create` mostra duas coisas diferentes, e o `enroll` pede as duas:
 | **token** | `inv_9LYq…` | senha de uso único: autoriza **uma** máquina a se cadastrar. Depois de usado, ou vencido o `--ttl`, não vale mais |
 | **ca pin** | `sha256:a6c6…` (64 dígitos hex) | impressão digital do servidor: o agente só fala com o servidor cuja CA tem esse SHA-256. É o mesmo para todas as máquinas e não é segredo |
 
-Um token por máquina: para cadastrar dez, rode `token create` dez vezes.
+Por padrão o token cadastra uma máquina. Para um lote, `--uses 10` cadastra até dez; `token list`
+mostra quantos usos restam e `token revoke <id>` corta o token se ele vazar (as máquinas já
+cadastradas continuam).
 
 **4. Cadastrar a máquina** (PowerShell **como administrador**; no Linux, root)
 
@@ -206,6 +217,7 @@ go build -o bin/ ./cmd/invenire-server
 bin/invenire-server serve --listen :8443 --data data --hosts localhost,invenire.local,10.0.0.5
 bin/invenire-server tenant create "Prefeitura"
 bin/invenire-server token create --tenant "Prefeitura" --ttl 24h --description "lote 1"
+bin/invenire-server status --tenant "Prefeitura"
 bin/invenire-server actor create --tenant "Prefeitura" --name "athos" --scopes read,admin
 ```
 
@@ -237,6 +249,13 @@ saem da CA do tenant.
 `token create` mostra o token de cadastro (uso único, só o SHA-256 fica no banco) e o pin
 SHA-256 da CA da instalação, que o agente usa para conferir o servidor no primeiro contato. Com
 certificado público, não há pin.
+
+`status` mostra o parque do tenant, uma máquina por linha e as que precisam de atenção primeiro:
+`em-dia`, `na-fila` (esperando a ingestão), `sem-coleta` (cadastrada, nada chegou),
+`atrasado` (o agente não aparece há mais de `--stale`, padrão 12h), `erro` (snapshot que a
+ingestão não aplicou, com o motivo) e `sem-agente` (revogado). Com `--check` ele sai com código
+1 se houver problema, para um cron avisar. `health` confere o `/healthz` do servidor local; é o
+healthcheck da imagem Docker.
 
 | Rota | Autenticação | Faz |
 |---|---|---|

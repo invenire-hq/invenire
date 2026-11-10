@@ -381,7 +381,7 @@ SELECT
   (SELECT count(*) FROM org_unit c WHERE c.parent_id = $1)::int AS children,
   (SELECT count(*) FROM asset a WHERE a.unit_id = $1)::int AS assets,
   (SELECT count(*) FROM enrollment_token t
-    WHERE t.unit_id = $1 AND t.used_at IS NULL AND t.expires_at > now())::int AS pending_tokens
+    WHERE t.unit_id = $1 AND t.uses < t.max_uses AND t.revoked_at IS NULL AND t.expires_at > now())::int AS pending_tokens
 `
 
 type UnitUsageRow struct {

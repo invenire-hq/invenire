@@ -27,11 +27,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -56,9 +58,17 @@ comandos:
   tenant export --tenant <n> --out <arquivo> [--with-ca-key]
                               exporta o tenant inteiro num pacote .tar.gz
   tenant verify <arquivo>     confere um pacote exportado, sem banco
-  token create --tenant <n> [--unit <caminho>]
-                              cria um token de cadastro de agente, de uso único;
-                              com --unit, a máquina já entra nessa unidade
+  token create --tenant <n> [--unit <caminho>] [--uses N]
+                              cria um token de cadastro de agente (um uso, ou N
+                              máquinas com --uses); com --unit, a máquina já
+                              entra nessa unidade
+  token list --tenant <n> [--all]
+                              mostra os tokens de cadastro e quantos usos restam
+  token revoke --tenant <n> <id>
+                              revoga um token de cadastro
+  status --tenant <n> [--stale 12h]
+                              situação do parque: agentes em dia, atrasados,
+                              snapshots com erro, corrente quebrada
   unit create --tenant <n> [--parent <caminho>] [--kind <tipo>] <nome>
                               cria uma unidade (secretaria, site, setor…)
   unit list --tenant <n>      mostra a árvore de unidades do tenant
@@ -90,6 +100,14 @@ func main() {
 		err = runTenantVerify(os.Args[3:])
 	case cmd == "token create":
 		err = runTokenCreate(ctx, os.Args[3:])
+	case os.Args[1] == "health":
+		err = runHealth(ctx, os.Args[2:])
+	case os.Args[1] == "status":
+		err = runStatus(ctx, os.Args[2:])
+	case cmd == "token list":
+		err = runTokenList(ctx, os.Args[3:])
+	case cmd == "token revoke":
+		err = runTokenRevoke(ctx, os.Args[3:])
 	case cmd == "unit create":
 		err = runUnitCreate(ctx, os.Args[3:])
 	case cmd == "unit list":
@@ -429,10 +447,14 @@ func runTokenCreate(ctx context.Context, args []string) error {
 	ttl := fs.Duration("ttl", 24*time.Hour, "validade do token")
 	desc := fs.String("description", "", "para que ou para quem é o token")
 	unit := fs.String("unit", "", "caminho da unidade onde a máquina entra, ex.: Saúde/UBS Centro")
+	uses := fs.Int("uses", 1, "quantas máquinas o token cadastra (um lote, como o piloto); revogue com token revoke")
 	dataDir := fs.String("data", "data", "diretório de dados do servidor, para mostrar o pin da CA")
 	fs.Parse(args)
 	if *tenant == "" {
 		return errors.New("--tenant é obrigatório")
+	}
+	if *uses < 1 || *uses > 10000 {
+		return errors.New("--uses de 1 a 10000")
 	}
 
 	pool, err := connect(ctx)
@@ -453,11 +475,14 @@ func runTokenCreate(ctx context.Context, args []string) error {
 		}
 		unitID = &u.ID
 	}
-	token, expires, err := api.NewEnrollmentToken(ctx, q, t.ID, unitID, *desc, *ttl)
+	tok, err := api.CreateEnrollmentToken(ctx, q, api.TokenSpec{Tenant: t.ID, Unit: unitID, Description: *desc, TTL: *ttl, Uses: *uses})
 	if err != nil {
 		return err
 	}
-	fmt.Printf("token:   %s\nexpira:  %s\n", token, expires.Format(time.RFC3339))
+	fmt.Printf("token:   %s\nid:      %s\nexpira:  %s\nusos:    %d\n", tok.Token, tok.ID, tok.ExpiresAt.Format(time.RFC3339), *uses)
+	if *uses > 1 {
+		fmt.Fprintln(os.Stderr, "aviso: este token cadastra várias máquinas; se vazar, corte com: invenire-server token revoke --tenant", strconvQuote(*tenant), tok.ID)
+	}
 	if unitID != nil {
 		fmt.Printf("unidade: %s\n", strings.Trim(*unit, "/"))
 	}
@@ -474,6 +499,205 @@ func runTokenCreate(ctx context.Context, args []string) error {
 	} else {
 		fmt.Fprintf(os.Stderr, "aviso: sem pin da CA (%v); o agente terá de confiar no servidor no primeiro contato\n", err)
 	}
+	return nil
+}
+
+func strconvQuote(s string) string { return fmt.Sprintf("%q", s) }
+
+// errProblems faz o status --check sair com 1 quando há ativos que precisam
+// de atenção, para um cron ou monitor avisar.
+var errProblems = errors.New("há ativos que precisam de atenção")
+
+func runStatus(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	tenant := fs.String("tenant", "", "nome do tenant (obrigatório)")
+	stale := fs.Duration("stale", 12*time.Hour, "sem notícia do agente por mais que isto = atrasado (coleta padrão a cada 4h)")
+	check := fs.Bool("check", false, "sair com código 1 se algum ativo precisar de atenção (para cron ou monitor)")
+	fs.Parse(args)
+	if *tenant == "" {
+		return errors.New("--tenant é obrigatório")
+	}
+	pool, err := connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	q := store.New(pool)
+	t, err := q.GetTenantByName(ctx, *tenant)
+	if err != nil {
+		return fmt.Errorf("tenant %q: %w", *tenant, err)
+	}
+	now := time.Now()
+	p, err := api.TenantParkStatus(ctx, q, t.ID, *stale, now)
+	if err != nil {
+		return err
+	}
+	ago := func(at *time.Time) string {
+		if at == nil {
+			return "nunca"
+		}
+		d := now.Sub(*at)
+		switch {
+		case d < time.Minute:
+			return "agora"
+		case d < time.Hour:
+			return fmt.Sprintf("há %dmin", int(d.Minutes()))
+		case d < 48*time.Hour:
+			return fmt.Sprintf("há %dh", int(d.Hours()))
+		}
+		return fmt.Sprintf("há %dd", int(d.Hours()/24))
+	}
+	fmt.Printf("%-11s %-24s %-8s %-9s %-10s %-10s %6s  %s\n", "ESTADO", "HOSTNAME", "SO", "AGENTE", "VISTO", "COLETA", "PROGS", "UNIDADE")
+	for _, a := range p.Assets {
+		extra := ""
+		if a.Pending > 0 {
+			extra += fmt.Sprintf("  %d na fila", a.Pending)
+		}
+		if a.Failed > 0 {
+			extra += fmt.Sprintf("  %d com erro", a.Failed)
+		}
+		if a.ChainBreaks > 0 {
+			extra += fmt.Sprintf("  corrente quebrada %dx", a.ChainBreaks)
+		}
+		host := a.Hostname
+		if len(host) > 24 {
+			host = host[:23] + "…"
+		}
+		fmt.Printf("%-11s %-24s %-8s %-9s %-10s %-10s %6d  %s%s\n", a.State, orDash(host), orDash(a.OSFamily), orDash(a.AgentVersion),
+			ago(a.AgentLastSeen), ago(a.LastCollected), a.Installed, orDash(a.Unit), extra)
+	}
+	fmt.Printf("\n%d ativo(s):", len(p.Assets))
+	for _, s := range []string{api.StateOK, api.StatePending, api.StateNoData, api.StateStale, api.StateFailed, api.StateNoAgent} {
+		if n := p.ByState[s]; n > 0 {
+			fmt.Printf(" %d %s", n, s)
+		}
+	}
+	fmt.Printf("\nsistemas:   %s\nversões:    %s\n", counts(p.ByOS), counts(p.ByVersion))
+	fmt.Printf("software:   %d nome(s) sem produto (GET /v1/software/unmapped)\n", p.Unmapped)
+	fmt.Printf("cadastros:  %d restante(s) nos tokens válidos (token list)\n", p.ValidTokens)
+	for _, e := range p.Errors {
+		fmt.Printf("erro:       %s, snapshot %s de %s: %s\n", orDash(deref(e.Hostname)), e.ID, e.CollectedAt.Format("2006-01-02 15:04"), deref(e.IngestError))
+	}
+	if *check && p.Problems() > 0 {
+		return fmt.Errorf("%w: %d", errProblems, p.Problems())
+	}
+	return nil
+}
+
+func counts(m map[string]int) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s %d", k, m[k]))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func runTokenList(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("token list", flag.ExitOnError)
+	tenant := fs.String("tenant", "", "nome do tenant (obrigatório)")
+	all := fs.Bool("all", false, "incluir gastos, vencidos e revogados")
+	fs.Parse(args)
+	if *tenant == "" {
+		return errors.New("--tenant é obrigatório")
+	}
+	pool, err := connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	q := store.New(pool)
+	t, err := q.GetTenantByName(ctx, *tenant)
+	if err != nil {
+		return fmt.Errorf("tenant %q: %w", *tenant, err)
+	}
+	rows, err := q.ListEnrollmentTokens(ctx, store.ListEnrollmentTokensParams{TenantID: t.ID, IncludeAll: *all})
+	if err != nil {
+		return err
+	}
+	units, err := q.ListUnits(ctx, t.ID)
+	if err != nil {
+		return err
+	}
+	path := map[uuid.UUID]string{}
+	for _, u := range units {
+		path[u.ID] = u.Path
+	}
+	if len(rows) == 0 {
+		fmt.Fprintln(os.Stderr, "nenhum token válido (--all mostra também os gastos, vencidos e revogados)")
+		return nil
+	}
+	now := time.Now()
+	for _, r := range rows {
+		state := "válido"
+		switch {
+		case r.RevokedAt != nil:
+			state = "revogado"
+		case r.Uses >= r.MaxUses:
+			state = "gasto"
+		case !r.ExpiresAt.After(now):
+			state = "vencido"
+		}
+		unit := "-"
+		if r.UnitID != nil {
+			unit = path[*r.UnitID]
+		}
+		fmt.Printf("%s  %-8s  %d/%d usos  expira %s  unidade %s  %s\n",
+			r.ID, state, r.Uses, r.MaxUses, r.ExpiresAt.Format("2006-01-02 15:04"), unit, r.Description)
+	}
+	return nil
+}
+
+func runTokenRevoke(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("token revoke", flag.ExitOnError)
+	tenant := fs.String("tenant", "", "nome do tenant (obrigatório)")
+	fs.Parse(args)
+	if *tenant == "" || fs.NArg() != 1 {
+		return errors.New("uso: invenire-server token revoke --tenant <nome> <id do token>")
+	}
+	id, err := uuid.Parse(fs.Arg(0))
+	if err != nil {
+		return errors.New("id do token inválido (veja: invenire-server token list)")
+	}
+	pool, err := connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	q := store.New(pool)
+	t, err := q.GetTenantByName(ctx, *tenant)
+	if err != nil {
+		return fmt.Errorf("tenant %q: %w", *tenant, err)
+	}
+	r, err := q.RevokeEnrollmentToken(ctx, store.RevokeEnrollmentTokenParams{ID: id, TenantID: t.ID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errors.New("token não encontrado neste tenant, ou já revogado")
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Printf("token %s revogado depois de %d de %d uso(s); as máquinas já cadastradas continuam\n", r.ID, r.Uses, r.MaxUses)
 	return nil
 }
 
@@ -657,4 +881,30 @@ func modTime(path string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return st.ModTime(), nil
+}
+
+// runHealth confere se o serve local responde: é o healthcheck do contêiner,
+// que não tem curl. Só pergunta ao próprio processo, por isso não confere o
+// certificado.
+func runHealth(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("health", flag.ExitOnError)
+	url := fs.String("url", "https://127.0.0.1:8443/healthz", "endereço do /healthz")
+	fs.Parse(args)
+	c := &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, // #nosec: só localhost
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, *url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("%s respondeu %d", *url, resp.StatusCode)
+	}
+	return nil
 }

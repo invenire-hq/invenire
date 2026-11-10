@@ -97,6 +97,9 @@ type EnrollmentToken struct {
 	UsedAt      *time.Time
 	UsedBy      *uuid.UUID
 	UnitID      *uuid.UUID
+	MaxUses     int32
+	Uses        int32
+	RevokedAt   *time.Time
 }
 
 type Installation struct {

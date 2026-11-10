@@ -37,19 +37,19 @@ RETURNING *;
 SELECT * FROM agent WHERE cert_fingerprint = $1 AND revoked_at IS NULL;
 
 -- name: CreateEnrollmentToken :one
-INSERT INTO enrollment_token (tenant_id, token_hash, description, created_by, expires_at, unit_id)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO enrollment_token (tenant_id, token_hash, description, created_by, expires_at, unit_id, max_uses)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id, expires_at;
 
 -- name: ConsumeEnrollmentToken :one
 -- Reserva o token na transação do enrollment. FOR UPDATE impede que dois
 -- cadastros simultâneos usem o mesmo token; MarkEnrollmentTokenUsed fecha.
 SELECT id, tenant_id, unit_id FROM enrollment_token
-WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
+WHERE token_hash = $1 AND uses < max_uses AND revoked_at IS NULL AND expires_at > now()
 FOR UPDATE;
 
 -- name: MarkEnrollmentTokenUsed :exec
-UPDATE enrollment_token SET used_at = now(), used_by = $2 WHERE id = $1;
+UPDATE enrollment_token SET used_at = now(), used_by = $2, uses = uses + 1 WHERE id = $1;
 
 -- name: TouchAgent :exec
 UPDATE agent SET last_seen_at = now(), agent_version = $2 WHERE id = $1;
@@ -92,3 +92,18 @@ FROM snapshot
 WHERE asset_id = $1
 WINDOW w AS (ORDER BY collected_at, received_at)
 ORDER BY collected_at, received_at;
+
+-- name: ListEnrollmentTokens :many
+-- Tokens do tenant, dos mais novos aos mais velhos; all = incluir os gastos,
+-- vencidos e revogados (include_all).
+SELECT t.id, t.description, t.created_at, t.expires_at, t.used_at, t.uses, t.max_uses, t.revoked_at,
+       u.id AS unit_id
+FROM enrollment_token t LEFT JOIN org_unit u ON u.id = t.unit_id
+WHERE t.tenant_id = @tenant_id
+  AND (@include_all::boolean OR (t.uses < t.max_uses AND t.revoked_at IS NULL AND t.expires_at > now()))
+ORDER BY t.created_at DESC, t.id;
+
+-- name: RevokeEnrollmentToken :one
+UPDATE enrollment_token SET revoked_at = now()
+WHERE id = @id AND tenant_id = @tenant_id AND revoked_at IS NULL
+RETURNING id, uses, max_uses;

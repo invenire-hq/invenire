@@ -1,0 +1,8 @@
+.git
+bin
+data
+dist
+backup
+*.exe
+snapshot*.json
+deploy/piloto/.env

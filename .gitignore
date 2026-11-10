@@ -3,3 +3,6 @@
 snapshot*.json
 !pkg/snapshot/schema/*.json
 /data/
+/dist/
+deploy/piloto/.env
+deploy/piloto/backup/
