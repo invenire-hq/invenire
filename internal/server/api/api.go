@@ -39,6 +39,9 @@ type Server struct {
 	// o Wake do worker.
 	Wake func()
 
+	// Version é a versão do servidor, gravada nos pacotes de exportação.
+	Version string
+
 	// Suggest, se definido, dá o palpite das regras para cada nome da lista
 	// de não identificados.
 	Suggest func(source, rawName, rawVendor string) (normalize.Match, bool)
@@ -100,6 +103,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/software", s.userAuth(scopeRead, s.listSoftware))
 	mux.Handle("GET /v1/software/{id}/installations", s.userAuth(scopeRead, s.softwareInstallations))
 	mux.Handle("GET /v1/changes", s.userAuth(scopeRead, s.listChanges))
+	mux.Handle("GET /v1/export", s.userAuth(scopeAdmin, s.exportTenant))
 	return mux
 }
 

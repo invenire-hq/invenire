@@ -69,6 +69,17 @@ func LoadOrCreateMasterKey(dir string) (*MasterKey, error) {
 	return NewMasterKey(raw)
 }
 
+// LoadMasterKey lê a chave-mestra como LoadOrCreateMasterKey, mas nunca a
+// cria: quem só lê (exportar) não pode inventar uma chave nova por engano.
+func LoadMasterKey(dir string) (*MasterKey, error) {
+	if os.Getenv(MasterKeyEnv) == "" {
+		if _, err := os.Stat(filepath.Join(dir, masterKeyFile)); err != nil {
+			return nil, fmt.Errorf("pki: chave-mestra não encontrada (%s em %s, ou %s): %w", masterKeyFile, dir, MasterKeyEnv, err)
+		}
+	}
+	return LoadOrCreateMasterKey(dir)
+}
+
 // NewMasterKey usa 32 bytes como chave AES-256-GCM.
 func NewMasterKey(raw []byte) (*MasterKey, error) {
 	if len(raw) != 32 {

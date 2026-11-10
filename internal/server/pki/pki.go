@@ -137,6 +137,9 @@ func fromParts(cert *x509.Certificate, k any) (*CA, error) {
 	if !ok || !cert.IsCA {
 		return nil, errors.New("pki: chave ou certificado da CA inválido")
 	}
+	if pub, ok := key.Public().(interface{ Equal(crypto.PublicKey) bool }); !ok || !pub.Equal(cert.PublicKey) {
+		return nil, errors.New("pki: a chave não é a do certificado da CA")
+	}
 	return &CA{Cert: cert, key: key, pem: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})}, nil
 }
 

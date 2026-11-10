@@ -2,6 +2,8 @@
 //
 //	invenire-server serve
 //	invenire-server tenant create <nome>
+//	invenire-server tenant export --tenant <nome> --out <arquivo>
+//	invenire-server tenant verify <arquivo>
 //	invenire-server token create --tenant <nome> [--unit Saúde/UBS Centro]
 //	invenire-server unit create --tenant <nome> [--parent Saúde] [--kind setor] <nome>
 //
@@ -13,11 +15,13 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -32,6 +36,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/athosbes/invenire/internal/server/api"
+	"github.com/athosbes/invenire/internal/server/export"
 	"github.com/athosbes/invenire/internal/server/ingest"
 	"github.com/athosbes/invenire/internal/server/normalize"
 	"github.com/athosbes/invenire/internal/server/pki"
@@ -48,6 +53,9 @@ func usage() {
 comandos:
   serve                       aplica as migrações e sobe a API (HTTPS com mTLS)
   tenant create <nome>        cria um tenant
+  tenant export --tenant <n> --out <arquivo> [--with-ca-key]
+                              exporta o tenant inteiro num pacote .tar.gz
+  tenant verify <arquivo>     confere um pacote exportado, sem banco
   token create --tenant <n> [--unit <caminho>]
                               cria um token de cadastro de agente, de uso único;
                               com --unit, a máquina já entra nessa unidade
@@ -76,6 +84,10 @@ func main() {
 		err = runServe(ctx, os.Args[2:])
 	case cmd == "tenant create":
 		err = runTenantCreate(ctx, os.Args[3:])
+	case cmd == "tenant export":
+		err = runTenantExport(ctx, os.Args[3:])
+	case cmd == "tenant verify":
+		err = runTenantVerify(os.Args[3:])
 	case cmd == "token create":
 		err = runTokenCreate(ctx, os.Args[3:])
 	case cmd == "unit create":
@@ -196,6 +208,7 @@ func runServe(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	srv.Version = version
 	rules, err := normalize.Default()
 	if err != nil {
 		return err
@@ -255,6 +268,139 @@ func runServe(ctx context.Context, args []string) error {
 func caPin(ca *pki.CA) string {
 	h := sha256.Sum256(ca.Cert.Raw)
 	return hex.EncodeToString(h[:])
+}
+
+// exportKeyEnv traz a chave de exportação para o tenant verify sem que ela
+// fique no histórico do terminal.
+const exportKeyEnv = "INVENIRE_EXPORT_KEY"
+
+func runTenantExport(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("tenant export", flag.ExitOnError)
+	tenant := fs.String("tenant", "", "nome do tenant (obrigatório)")
+	out := fs.String("out", "", "arquivo do pacote, ex.: prefeitura.invenire.tar.gz (obrigatório)")
+	withKey := fs.Bool("with-ca-key", false, "inclui a chave da CA do tenant, cifrada com uma chave de exportação mostrada uma vez")
+	dataDir := fs.String("data", "data", "diretório de dados do servidor (chave-mestra, só com --with-ca-key)")
+	fs.Parse(args)
+	if *tenant == "" || *out == "" {
+		return errors.New("uso: invenire-server tenant export --tenant <nome> --out <arquivo> [--with-ca-key]")
+	}
+	if _, err := os.Stat(*out); err == nil {
+		return fmt.Errorf("%s já existe; escolha outro nome", *out)
+	}
+	opts := export.Options{ServerVersion: version, WithCAKey: *withKey}
+	if *withKey {
+		var err error
+		if opts.Master, err = pki.LoadMasterKey(*dataDir); err != nil {
+			return err
+		}
+	}
+	pool, err := connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	t, err := store.New(pool).GetTenantByName(ctx, *tenant)
+	if err != nil {
+		return fmt.Errorf("tenant %q: %w", *tenant, err)
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(*out), ".export-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	h := sha256.New()
+	res, err := export.Write(ctx, pool, t.ID, io.MultiWriter(tmp, h), opts)
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(tmp.Name(), *out); err != nil {
+		return err
+	}
+	m := res.Manifest
+	if err := export.Record(ctx, store.New(pool), nil, m, *withKey, "cli"); err != nil {
+		return fmt.Errorf("pacote gravado, mas o registro no change_log falhou: %w", err)
+	}
+	fmt.Printf("pacote:     %s\nsha256:     %s\ntenant:     %s (%s)\nas_of:      %d\n", *out, hex.EncodeToString(h.Sum(nil)), m.Tenant.Name, m.Tenant.ID, m.AsOf)
+	fmt.Printf("registros:  %d ativos, %d agentes, %d snapshots, %d unidades, %d mapeamentos, %d eventos\n",
+		m.Files[export.FileAssets].Records, m.Files[export.FileAgents].Records, m.SnapshotBodies+m.SnapshotPayloads,
+		m.Files[export.FileUnits].Records, m.Files[export.FileMappings].Records, m.Files[export.FileChanges].Records)
+	if res.ExportKey != nil && res.CAKeys == 0 {
+		fmt.Fprintln(os.Stderr, "aviso: o tenant não tem CA com chave (só a CA antiga da instalação, de conferência): o pacote vai sem chave de CA")
+	} else if res.ExportKey != nil {
+		fmt.Printf("chave:      %s (abre %d chave(s) de CA)\n", base64.StdEncoding.EncodeToString(res.ExportKey), res.CAKeys)
+		fmt.Fprintln(os.Stderr, "a chave acima abre a chave da CA do tenant e só aparece agora: guarde-a separada do pacote")
+	}
+	return nil
+}
+
+func runTenantVerify(args []string) error {
+	fs := flag.NewFlagSet("tenant verify", flag.ExitOnError)
+	keyFlag := fs.String("export-key", "", "chave de exportação, para conferir a chave da CA (ou "+exportKeyEnv+")")
+	fs.Parse(args)
+	if fs.NArg() != 1 {
+		return errors.New("uso: invenire-server tenant verify [--export-key <chave>] <arquivo>")
+	}
+	var key []byte
+	if *keyFlag == "" {
+		*keyFlag = os.Getenv(exportKeyEnv)
+	}
+	if *keyFlag != "" {
+		var err error
+		if key, err = base64.StdEncoding.DecodeString(strings.TrimSpace(*keyFlag)); err != nil || len(key) != 32 {
+			return errors.New("chave de exportação inválida (32 bytes em base64)")
+		}
+	}
+	f, err := os.Open(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	h := sha256.New()
+	rep, err := export.Verify(io.TeeReader(f, h), key)
+	if err != nil {
+		return err
+	}
+	io.Copy(h, f) // o que vier depois do fim do gzip também entra no sha256 do arquivo
+	m := rep.Manifest
+	fmt.Printf("sha256:     %s\ntenant:     %s (%s)\nexportado:  %s, as_of %d, servidor %s\n",
+		hex.EncodeToString(h.Sum(nil)), m.Tenant.Name, m.Tenant.ID, m.ExportedAt.Format(time.RFC3339), m.AsOf, m.ServerVersion)
+	fmt.Printf("registros:  %d ativos, %d agentes, %d snapshots, %d unidades, %d mapeamentos, %d eventos\n",
+		rep.Records[export.FileAssets], rep.Records[export.FileAgents], rep.Snapshots,
+		rep.Records[export.FileUnits], rep.Records[export.FileMappings], rep.Records[export.FileChanges])
+	if rep.PayloadOnly > 0 {
+		fmt.Printf("sem bytes:  %d snapshot(s) recebido(s) antes de o servidor guardar os bytes originais: vão só como payload, sem sha256 reconferível\n", rep.PayloadOnly)
+	}
+	if len(rep.ChainBreaks) > 0 {
+		fmt.Printf("corrente:   %d elo(s) com prev_sha256 divergente (registrados como alerta na origem):\n", len(rep.ChainBreaks))
+		for _, b := range rep.ChainBreaks[:min(len(rep.ChainBreaks), 20)] {
+			fmt.Printf("            ativo %s, snapshot %s\n", b.AssetID, b.SnapshotID)
+		}
+	} else {
+		fmt.Println("corrente:   íntegra em todos os ativos")
+	}
+	switch {
+	case key != nil:
+		fmt.Printf("chave CA:   %d chave(s) aberta(s) e conferida(s)\n", rep.CAKeys)
+	case m.CAKey != nil:
+		fmt.Println("chave CA:   incluída, não conferida (passe --export-key)")
+	default:
+		fmt.Println("chave CA:   não incluída")
+	}
+	if !rep.OK() {
+		for _, p := range rep.Problems {
+			fmt.Fprintln(os.Stderr, "problema:", p)
+		}
+		return fmt.Errorf("pacote com %d problema(s) de integridade", len(rep.Problems))
+	}
+	fmt.Println("resultado:  íntegro")
+	return nil
 }
 
 func runTenantCreate(ctx context.Context, args []string) error {

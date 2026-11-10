@@ -21,6 +21,7 @@ A arquitetura e o modelo de dados estão no documento
 - [x] Unidades em árvore livre (`org_unit`), etiquetas (`asset_label`), token de cadastro com unidade (`token create --unit`)
 - [x] Renovação automática do crachá, recadastro que revoga o agente anterior e recusa de snapshot com data no futuro
 - [x] Rotas de consulta: ativos (com filtro por unidade, etiqueta e software), software de um ativo, histórico, produtos e instalações de um produto, fluxo de mudanças
+- [x] Exportação do tenant (`tenant export`, `tenant verify`, `GET /v1/export`) com formato documentado em [docs/exportacao.md](docs/exportacao.md); importação ainda não
 
 ## Do zero à primeira máquina
 
@@ -261,6 +262,7 @@ certificado público, não há pin.
 | `GET /v1/software` | token de API, escopo `read` | produtos instalados agora no tenant, com quantos ativos e versões (`?product=`, `?unit=`) |
 | `GET /v1/software/{id}/installations` | token de API, escopo `read` | em quais ativos o produto está, com as versões e quantos ativos cada uma tem (`?version=`, `?version_id=`, `?unit=`) |
 | `GET /v1/changes` | token de API, escopo `read` | o fluxo de mudanças do tenant depois de um cursor (`?after=`, `?kind=a,b`) |
+| `GET /v1/export` | token de API, escopo `admin` | o pacote de exportação do tenant (`?with_ca_key=true` inclui a chave da CA; veja [Exportação do tenant](#exportação-do-tenant)) |
 | `GET /healthz` | nenhuma | 204 se o banco responde |
 
 **Consultas.** Filtros de `GET /v1/assets`: `?unit=` (id, caminho como `Saúde/UBS Centro`,
@@ -321,6 +323,33 @@ Toda mudança vai para o `change_log` com ator e data: `unit_created`, `unit_upd
 `unit_deleted`, `asset_moved` (com `from_unit_id` e `to_unit_id`, o que responde "onde estava
 esta máquina em março?"), `label_set` e `label_removed`. O banco garante, por chave
 estrangeira com o `tenant_id`, que ativo, token e unidade são sempre do mesmo tenant.
+
+### Exportação do tenant
+
+O tenant inteiro sai num pacote `.tar.gz`: os snapshots com os bytes exatos que os agentes
+enviaram, ativos, agentes, unidades, etiquetas, mapeamentos manuais, produtos do tenant, atores,
+propostas e o `change_log`. Instalações e mapeamentos de regra não vão: são recalculados dos
+snapshots por quem importa. O formato está em [docs/exportacao.md](docs/exportacao.md).
+
+```sh
+bin/invenire-server tenant export --tenant "Prefeitura" --out prefeitura.invenire.tar.gz
+bin/invenire-server tenant verify prefeitura.invenire.tar.gz
+```
+
+O `verify` não precisa de banco: confere o SHA-256 de cada arquivo contra o manifesto, os bytes
+de cada snapshot contra o hash, a corrente de cada ativo e as referências entre os registros, e
+mostra o SHA-256 do pacote inteiro, que serve de impressão digital. Pela API, a mesma exportação
+é `GET /v1/export` com token `admin`.
+
+Com `--with-ca-key` (na API, `?with_ca_key=true`), o pacote leva a chave da CA do tenant,
+cifrada com uma chave de exportação que aparece uma vez só (na API, no cabeçalho
+`Invenire-Export-Key`). Com ela, o servidor novo continua emitindo crachás e os agentes só
+trocam de endereço (`set-server`); sem ela, os agentes precisam ser recadastrados. Guarde a
+chave separada do pacote. Para conferir a chave no `verify`, passe `--export-key` ou
+`INVENIRE_EXPORT_KEY`.
+
+Toda exportação vira `tenant_exported` no `change_log`. A importação ainda não existe; o passo
+a passo que ela deve seguir está no fim de [docs/exportacao.md](docs/exportacao.md).
 
 ### Ingestão
 
