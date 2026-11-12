@@ -32,6 +32,7 @@ type Agent struct {
 	TenantCaID          *uuid.UUID
 	PrevCertFingerprint *string
 	PrevTenantCaID      *uuid.UUID
+	LastRenewSignedAt   *time.Time
 }
 
 type ApiToken struct {

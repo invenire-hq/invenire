@@ -46,7 +46,7 @@ func (q *Queries) ExportActors(ctx context.Context, tenantID uuid.UUID) ([]Actor
 }
 
 const exportAgents = `-- name: ExportAgents :many
-SELECT g.id, g.asset_id, g.cert_fingerprint, g.agent_version, g.enrolled_at, g.last_seen_at, g.revoked_at, g.tenant_ca_id, g.prev_cert_fingerprint, g.prev_tenant_ca_id FROM agent g JOIN asset a ON a.id = g.asset_id
+SELECT g.id, g.asset_id, g.cert_fingerprint, g.agent_version, g.enrolled_at, g.last_seen_at, g.revoked_at, g.tenant_ca_id, g.prev_cert_fingerprint, g.prev_tenant_ca_id, g.last_renew_signed_at FROM agent g JOIN asset a ON a.id = g.asset_id
 WHERE a.tenant_id = $1 ORDER BY g.enrolled_at, g.id
 `
 
@@ -70,6 +70,7 @@ func (q *Queries) ExportAgents(ctx context.Context, tenantID uuid.UUID) ([]Agent
 			&i.TenantCaID,
 			&i.PrevCertFingerprint,
 			&i.PrevTenantCaID,
+			&i.LastRenewSignedAt,
 		); err != nil {
 			return nil, err
 		}

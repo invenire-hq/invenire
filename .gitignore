@@ -6,3 +6,5 @@ snapshot*.json
 /dist/
 deploy/piloto/.env
 deploy/piloto/backup/
+deploy/servidor/.env
+deploy/servidor/backup/

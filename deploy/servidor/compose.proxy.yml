@@ -1,0 +1,77 @@
+# invenire-server atrás de um proxy reverso que já existe (Nginx, Caddy,
+# Traefik…) e termina o TLS com um certificado público. O servidor fala HTTP
+# puro, só em 127.0.0.1, e o agente se autentica assinando cada requisição.
+# Exemplo de Nginx em nginx/invenire.conf.
+#
+#   cp .env.proxy.example .env    # e preencha
+#   docker compose -f compose.proxy.yml up -d --build
+#   docker compose -f compose.proxy.yml exec server invenire-server tenant create "Minha Organização"
+#   docker compose -f compose.proxy.yml exec server invenire-server token create --tenant "Minha Organização"
+#
+# O agente cadastra pela URL pública, sem --ca-pin:
+#   invenire-agent enroll --server https://invenire.exemplo.org --token inv_…
+name: invenire-servidor
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: invenire
+      POSTGRES_PASSWORD: ${INVENIRE_PG_PASSWORD:?defina INVENIRE_PG_PASSWORD no .env}
+      POSTGRES_DB: invenire
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U invenire -d invenire"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  server:
+    build:
+      context: ../..
+      args:
+        VERSION: ${INVENIRE_VERSION:-dev}
+    image: invenire-server:${INVENIRE_VERSION:-dev}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      INVENIRE_DATABASE_URL: postgres://invenire:${INVENIRE_PG_PASSWORD}@postgres:5432/invenire?sslmode=disable
+    command:
+      - serve
+      - --behind-proxy
+      - --listen
+      - :8080
+      - --data
+      - data
+      # De onde o proxy conecta. Com o Nginx nesta mesma máquina, a conexão
+      # chega pela porta publicada abaixo e aparece vinda do gateway da rede
+      # do compose (172.31.250.1), que está nesta faixa. Com o proxy em outra
+      # máquina, ponha o IP dela (e publique a porta num IP da rede local).
+      - --trusted-proxies
+      - ${INVENIRE_TRUSTED_PROXIES:-172.31.250.0/24}
+    ports:
+      # Só o proxy fala com o servidor: HTTP puro não sai desta máquina.
+      - "${INVENIRE_BIND:-127.0.0.1}:${INVENIRE_PORT:-8080}:8080"
+    volumes:
+      - data:/var/lib/invenire
+    healthcheck:
+      test: ["CMD", "invenire-server", "health", "--url", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 6s
+      start_period: 20s
+
+networks:
+  default:
+    ipam:
+      config:
+        # Faixa fixa, para --trusted-proxies saber de onde vem o proxy. Mude
+        # (aqui e em INVENIRE_TRUSTED_PROXIES) se colidir com a sua rede.
+        - subnet: 172.31.250.0/24
+
+volumes:
+  pgdata:
+  data:

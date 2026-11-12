@@ -226,7 +226,7 @@ chave-mestra (`master.key`). São duas confianças separadas:
 
 | | Quem confere | Com o quê |
 |---|---|---|
-| O agente confere o servidor | o agente | a CA da instalação (`data/ca`), com o pin; ou, com `--tls-cert`/`--tls-key`, um certificado público pelas CAs do sistema |
+| O agente confere o servidor | o agente | a CA da instalação (`data/ca`), com o pin; ou, com `--tls-cert`/`--tls-key` ou atrás de proxy, um certificado público pelas CAs do sistema |
 | O servidor confere o agente | o servidor | a CA **do tenant** do agente, uma por tenant, independente, criada no primeiro cadastro |
 
 A CA da instalação emite o certificado TLS do servidor a cada subida, para os nomes de `--hosts`:
@@ -262,7 +262,7 @@ healthcheck da imagem Docker.
 | `POST /v1/enroll` | token de cadastro | recebe CSR e dados do host; devolve o crachá, assinado pela CA do tenant, e a CA da instalação (vazia com certificado público) |
 | `GET /v1/agent` | crachá de agente | diz de qual agente e ativo é o crachá; o `set-server` usa para conferir o servidor novo |
 | `POST /v1/agent/renew` | crachá de agente | recebe um CSR e devolve um crachá novo, da CA que assina hoje para o tenant; o crachá apresentado continua aceito até vencer |
-| `POST /v1/snapshots` | crachá de agente não revogado, conferido contra a CA do tenant que o emitiu | recebe o snapshot (gzip opcional) com o SHA-256 no cabeçalho `Invenire-Snapshot-SHA256`; 202 se novo, 200 se repetido; 422 se o `collected_at` estiver mais de 24h à frente do servidor |
+| `POST /v1/snapshots` | crachá de agente não revogado (mTLS ou assinatura), conferido contra a CA do tenant que o emitiu | recebe o snapshot (gzip opcional) com o SHA-256 no cabeçalho `Invenire-Snapshot-SHA256`; 202 se novo, 200 se repetido; 422 se o `collected_at` estiver mais de 24h à frente do servidor |
 | `GET /v1/software/unmapped` | token de API, escopo `read` | nomes sem produto nos ativos do tenant, dos mais comuns para os menos, com o palpite das regras (`?source=`, `?limit=`, `?cursor=`) |
 | `PUT /v1/software/raw/{id}` | token de API, escopo `admin` | mapeamento manual do tenant: `{"vendor": "…", "product": "…"}`; devolve `product_scope` (`catalog` ou `tenant`) |
 | `DELETE /v1/software/raw/{id}` | token de API, escopo `admin` | desfaz o mapeamento manual do tenant |
@@ -313,6 +313,42 @@ pode trazer esse texto (nome bruto, versão, caminho).
 Cada snapshot é guardado duas vezes: `payload` (jsonb, para consultar) e `body` (os bytes
 exatos, comprimidos com lz4). Um `CHECK` garante `sha256(body) = sha256`, e a consulta
 `VerifySnapshotChain` reconfere hashes e encadeamento de um ativo só com o que está no banco.
+
+### Atrás de um proxy reverso
+
+Quando o TLS termina num proxy (Nginx, Caddy, Traefik, Cloudflare Tunnel…), o certificado cliente
+do agente não chega ao servidor. Para isso o agente assina toda requisição autenticada com a
+chave do crachá (`Invenire-Agent-Cert`, `Invenire-Timestamp`, `Invenire-Signature`, sobre
+método, caminho, timestamp e SHA-256 do corpo como enviado), e o servidor confere a assinatura e
+depois o crachá do mesmo jeito que no mTLS (CA do tenant, revogação). O agente faz isso sempre,
+sem configuração; agentes anteriores a esta versão só falam mTLS e não passam por um proxy que
+termina TLS.
+
+```sh
+bin/invenire-server serve --behind-proxy --listen 127.0.0.1:8080 --trusted-proxies 127.0.0.1/32
+```
+
+- Escuta HTTP puro: deixe a porta acessível só ao proxy. Não emite certificado da CA da
+  instalação, o cadastro devolve a CA vazia e o agente cadastra sem `--ca-pin`, conferindo o
+  certificado público do proxy pelas CAs do sistema. O agente exige TLS 1.3 no proxy.
+- `--trusted-proxies` (obrigatório; IPs ou CIDRs) diz de onde o proxy conecta. Só dessas origens
+  os `X-Forwarded-For`/`X-Forwarded-Proto` são lidos (o primeiro vira o endereço nos logs); de
+  qualquer outra, requisição com `X-Forwarded-*` ou `Forwarded` recebe 403. Um
+  `X-Forwarded-Proto` diferente de `https` também recebe 403: o token teria passado em claro.
+- Só a assinatura é aceita. No modo direto (sem `--behind-proxy`) valem as duas, e o mTLS tem
+  preferência quando o certificado cliente vem no TLS.
+- O `Invenire-Timestamp` pode estar até 24h longe do relógio do servidor, para os dois lados
+  (relógio errado é comum no parque). Se a máquina estiver mais longe que isso, o agente acerta
+  o timestamp pelo `Date` da resposta e tenta de novo uma vez.
+- **Repetição.** Não há nonce: repetir um `POST /v1/snapshots` capturado dá 200 "repetido" e um
+  `GET /v1/agent` não muda nada. Repetir um `POST /v1/agent/renew` derrubaria o crachá que o
+  agente já usa, então o servidor guarda o timestamp da última renovação assinada
+  (`agent.last_renew_signed_at`) e só aceita outra com timestamp maior.
+- O limite de tamanho é conferido antes de ler o corpo (32 MiB no snapshot, como chega).
+
+`deploy/servidor/compose.proxy.yml` sobe servidor e banco nesse modo, com a porta só em
+`127.0.0.1`, e `deploy/servidor/nginx/invenire.conf` é um bloco `server` de exemplo para o Nginx
+(certificado público, `proxy_pass`, `client_max_body_size`, `X-Forwarded-*`).
 
 ### Unidades e etiquetas
 

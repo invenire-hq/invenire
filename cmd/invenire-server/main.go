@@ -24,6 +24,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -54,6 +55,9 @@ func usage() {
 
 comandos:
   serve                       aplica as migrações e sobe a API (HTTPS com mTLS)
+  serve --behind-proxy --trusted-proxies <CIDRs>
+                              sobe a API em HTTP puro, atrás de um proxy
+                              reverso que termina o TLS (Nginx, Caddy…)
   tenant create <nome>        cria um tenant
   tenant export --tenant <n> --out <arquivo> [--with-ca-key]
                               exporta o tenant inteiro num pacote .tar.gz
@@ -164,6 +168,8 @@ func runServe(ctx context.Context, args []string) error {
 	hosts := fs.String("hosts", "localhost,127.0.0.1", "nomes e IPs do certificado TLS do servidor, separados por vírgula")
 	tlsCert := fs.String("tls-cert", "", "certificado público do servidor (PEM, com a cadeia); sem ele, a CA da instalação emite um")
 	tlsKey := fs.String("tls-key", "", "chave do --tls-cert")
+	behindProxy := fs.Bool("behind-proxy", false, "HTTP puro atrás de um proxy reverso que termina o TLS; o agente se autentica por assinatura")
+	trustedProxies := fs.String("trusted-proxies", "", "com --behind-proxy: IPs ou CIDRs de onde o proxy conecta, separados por vírgula; só deles se leem os X-Forwarded-*")
 	minConf := fs.Float64("auto-map-confidence", normalize.DefaultMinConfidence,
 		"confiança mínima para uma regra mapear software sem revisão (0 a 1)")
 	fs.Parse(args)
@@ -172,6 +178,18 @@ func runServe(ctx context.Context, args []string) error {
 	}
 	if (*tlsCert == "") != (*tlsKey == "") {
 		return errors.New("--tls-cert e --tls-key vão juntos")
+	}
+	var trusted []netip.Prefix
+	if *behindProxy {
+		if *tlsCert != "" {
+			return errors.New("--behind-proxy e --tls-cert não vão juntos: o certificado público fica no proxy")
+		}
+		var err error
+		if trusted, err = api.ParseTrustedProxies(*trustedProxies); err != nil {
+			return err
+		}
+	} else if *trustedProxies != "" {
+		return errors.New("--trusted-proxies só vale com --behind-proxy")
 	}
 
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
@@ -196,7 +214,15 @@ func runServe(ctx context.Context, args []string) error {
 	var serverCA, legacyCA *pki.CA
 	var cert tls.Certificate
 	mode := "internal"
-	if *tlsCert != "" {
+	switch {
+	case *behindProxy:
+		// O certificado (público) é o do proxy: a CA da instalação não emite
+		// nada. A antiga, se houver, continua conferindo crachás antigos.
+		mode = "proxy"
+		if legacyCA, err = pki.Load(caDir); err != nil {
+			return err
+		}
+	case *tlsCert != "":
 		mode = "public"
 		if cert, err = tls.LoadX509KeyPair(*tlsCert, *tlsKey); err != nil {
 			return fmt.Errorf("--tls-cert: %w", err)
@@ -204,7 +230,7 @@ func runServe(ctx context.Context, args []string) error {
 		if legacyCA, err = pki.Load(caDir); err != nil {
 			return err
 		}
-	} else {
+	default:
 		if serverCA, err = pki.LoadOrCreate(caDir); err != nil {
 			return err
 		}
@@ -222,7 +248,7 @@ func runServe(ctx context.Context, args []string) error {
 	} else if n > 0 {
 		log.Info("agentes antigos ligados à CA da instalação", "agents", n)
 	}
-	srv, err := api.New(pool, api.Config{ServerCA: serverCA, MasterKey: master}, log)
+	srv, err := api.New(pool, api.Config{ServerCA: serverCA, MasterKey: master, BehindProxy: *behindProxy}, log)
 	if err != nil {
 		return err
 	}
@@ -247,16 +273,22 @@ func runServe(ctx context.Context, args []string) error {
 	// Antes de fechar o pool: a transação em curso termina ou é desfeita.
 	defer func() { stopIngest(); <-ingestDone }()
 
-	tlsCfg := srv.TLSConfig(cert)
-	if *tlsCert != "" {
-		// Certificado renovado em disco (certbot, por exemplo) entra sem reiniciar.
-		r := &certReloader{certFile: *tlsCert, keyFile: *tlsKey, cert: &cert, log: log}
-		r.mod, _ = modTime(*tlsCert)
-		tlsCfg.Certificates, tlsCfg.GetCertificate = nil, r.get
+	var tlsCfg *tls.Config
+	handler := srv.Handler()
+	if *behindProxy {
+		handler = api.ProxyHeaders(trusted, handler)
+	} else {
+		tlsCfg = srv.TLSConfig(cert)
+		if *tlsCert != "" {
+			// Certificado renovado em disco (certbot, por exemplo) entra sem reiniciar.
+			r := &certReloader{certFile: *tlsCert, keyFile: *tlsKey, cert: &cert, log: log}
+			r.mod, _ = modTime(*tlsCert)
+			tlsCfg.Certificates, tlsCfg.GetCertificate = nil, r.get
+		}
 	}
 	hs := &http.Server{
 		Addr:              *listen,
-		Handler:           srv.Handler(),
+		Handler:           handler,
 		TLSConfig:         tlsCfg,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       5 * time.Minute, // snapshots grandes em links lentos
@@ -270,12 +302,18 @@ func runServe(ctx context.Context, args []string) error {
 		hs.Shutdown(shutdownCtx)
 	}()
 
-	if serverCA != nil {
+	switch {
+	case *behindProxy:
+		log.Info("invenire-server no ar, em HTTP atrás de proxy", "version", version, "listen", *listen, "tls", mode, "trusted_proxies", *trustedProxies)
+		err = hs.ListenAndServe()
+	case serverCA != nil:
 		log.Info("invenire-server no ar", "version", version, "listen", *listen, "tls", mode, "ca_sha256", caPin(serverCA))
-	} else {
+		err = hs.ListenAndServeTLS("", "")
+	default:
 		log.Info("invenire-server no ar", "version", version, "listen", *listen, "tls", mode)
+		err = hs.ListenAndServeTLS("", "")
 	}
-	if err := hs.ListenAndServeTLS("", ""); !errors.Is(err, http.ErrServerClosed) {
+	if !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
@@ -486,7 +524,7 @@ func runTokenCreate(ctx context.Context, args []string) error {
 	if unitID != nil {
 		fmt.Printf("unidade: %s\n", strings.Trim(*unit, "/"))
 	}
-	if m, _ := os.ReadFile(filepath.Join(*dataDir, tlsModeFile)); strings.TrimSpace(string(m)) == "public" {
+	if m, _ := os.ReadFile(filepath.Join(*dataDir, tlsModeFile)); strings.TrimSpace(string(m)) == "public" || strings.TrimSpace(string(m)) == "proxy" {
 		fmt.Println("ca pin:  nenhum (o servidor usa certificado público: rode o enroll sem --ca-pin)")
 		return nil
 	}
@@ -841,7 +879,8 @@ func runActorCreate(ctx context.Context, args []string) error {
 }
 
 // tlsModeFile guarda, no diretório de dados, se o serve usa o certificado
-// da CA da instalação (internal) ou um público (public).
+// da CA da instalação (internal), um público (public) ou se está atrás de um
+// proxy que termina o TLS (proxy).
 const tlsModeFile = "tls-mode"
 
 // certReloader relê o certificado público quando o arquivo muda, conferindo

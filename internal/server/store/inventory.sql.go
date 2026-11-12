@@ -37,7 +37,7 @@ func (q *Queries) ConsumeEnrollmentToken(ctx context.Context, tokenHash []byte) 
 const createAgent = `-- name: CreateAgent :one
 INSERT INTO agent (id, asset_id, cert_fingerprint, agent_version, tenant_ca_id)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, asset_id, cert_fingerprint, agent_version, enrolled_at, last_seen_at, revoked_at, tenant_ca_id, prev_cert_fingerprint, prev_tenant_ca_id
+RETURNING id, asset_id, cert_fingerprint, agent_version, enrolled_at, last_seen_at, revoked_at, tenant_ca_id, prev_cert_fingerprint, prev_tenant_ca_id, last_renew_signed_at
 `
 
 type CreateAgentParams struct {
@@ -69,6 +69,7 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.TenantCaID,
 		&i.PrevCertFingerprint,
 		&i.PrevTenantCaID,
+		&i.LastRenewSignedAt,
 	)
 	return i, err
 }
@@ -123,7 +124,7 @@ func (q *Queries) CreateTenant(ctx context.Context, name string) (Tenant, error)
 }
 
 const getActiveAgentByCert = `-- name: GetActiveAgentByCert :one
-SELECT id, asset_id, cert_fingerprint, agent_version, enrolled_at, last_seen_at, revoked_at, tenant_ca_id, prev_cert_fingerprint, prev_tenant_ca_id FROM agent WHERE cert_fingerprint = $1 AND revoked_at IS NULL
+SELECT id, asset_id, cert_fingerprint, agent_version, enrolled_at, last_seen_at, revoked_at, tenant_ca_id, prev_cert_fingerprint, prev_tenant_ca_id, last_renew_signed_at FROM agent WHERE cert_fingerprint = $1 AND revoked_at IS NULL
 `
 
 // Usado na autenticação mTLS: agente revogado não é encontrado.
@@ -141,6 +142,7 @@ func (q *Queries) GetActiveAgentByCert(ctx context.Context, certFingerprint stri
 		&i.TenantCaID,
 		&i.PrevCertFingerprint,
 		&i.PrevTenantCaID,
+		&i.LastRenewSignedAt,
 	)
 	return i, err
 }

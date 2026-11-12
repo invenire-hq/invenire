@@ -7,6 +7,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -31,7 +32,7 @@ func (q *Queries) AssignLegacyAgents(ctx context.Context, arg AssignLegacyAgents
 }
 
 const getAgentForAuth = `-- name: GetAgentForAuth :one
-SELECT g.id, g.asset_id, g.cert_fingerprint, g.agent_version, g.enrolled_at, g.last_seen_at, g.revoked_at, g.tenant_ca_id, g.prev_cert_fingerprint, g.prev_tenant_ca_id, c.cert AS ca_cert
+SELECT g.id, g.asset_id, g.cert_fingerprint, g.agent_version, g.enrolled_at, g.last_seen_at, g.revoked_at, g.tenant_ca_id, g.prev_cert_fingerprint, g.prev_tenant_ca_id, g.last_renew_signed_at, c.cert AS ca_cert
 FROM agent g
 JOIN tenant_ca c ON c.id = CASE WHEN g.cert_fingerprint = $1::text
                                 THEN g.tenant_ca_id ELSE g.prev_tenant_ca_id END
@@ -61,6 +62,7 @@ func (q *Queries) GetAgentForAuth(ctx context.Context, fingerprint string) (GetA
 		&i.Agent.TenantCaID,
 		&i.Agent.PrevCertFingerprint,
 		&i.Agent.PrevTenantCaID,
+		&i.Agent.LastRenewSignedAt,
 		&i.CaCert,
 	)
 	return i, err
@@ -168,9 +170,12 @@ UPDATE agent SET
   prev_cert_fingerprint = CASE WHEN cert_fingerprint = $1::text THEN cert_fingerprint ELSE prev_cert_fingerprint END,
   prev_tenant_ca_id     = CASE WHEN cert_fingerprint = $1::text THEN tenant_ca_id ELSE prev_tenant_ca_id END,
   cert_fingerprint      = $2,
-  tenant_ca_id          = $3
-WHERE id = $4 AND revoked_at IS NULL
+  tenant_ca_id          = $3,
+  last_renew_signed_at  = coalesce($4::timestamptz, last_renew_signed_at)
+WHERE id = $5 AND revoked_at IS NULL
   AND (cert_fingerprint = $1::text OR prev_cert_fingerprint = $1::text)
+  AND ($4::timestamptz IS NULL OR last_renew_signed_at IS NULL
+       OR last_renew_signed_at < $4::timestamptz)
 RETURNING id
 `
 
@@ -178,17 +183,22 @@ type RenewAgentCertParams struct {
 	Presented       string
 	CertFingerprint string
 	TenantCaID      *uuid.UUID
+	SignedAt        *time.Time
 	ID              uuid.UUID
 }
 
 // Troca o crachá do agente. presented é o crachá com que ele se apresentou:
 // se for o atual, vira o anterior; se já for o anterior (a resposta da
 // renovação passada se perdeu), continua sendo, e só o atual é trocado.
+// signed_at é o timestamp da requisição assinada (nulo no mTLS): só passa se
+// for maior que o da última renovação assinada, o que barra a repetição de
+// uma renovação capturada.
 func (q *Queries) RenewAgentCert(ctx context.Context, arg RenewAgentCertParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, renewAgentCert,
 		arg.Presented,
 		arg.CertFingerprint,
 		arg.TenantCaID,
+		arg.SignedAt,
 		arg.ID,
 	)
 	var id uuid.UUID

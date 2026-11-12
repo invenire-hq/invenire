@@ -1,14 +1,25 @@
 // Package transport fala HTTP com o invenire-server: o cadastro, com a CA
-// conferida por pin, e o envio de snapshots com mTLS e gzip.
+// conferida por pin, e o envio de snapshots com gzip.
+//
+// Toda requisição autenticada vai com o crachá duas vezes: no TLS (mTLS, o
+// que o servidor confere quando fala TLS direto com o agente) e assinada com
+// a chave do crachá (cabeçalhos Invenire-*, o que o servidor confere atrás de
+// um proxy que termina o TLS). O agente não precisa saber qual é o caso.
 package transport
 
 import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +28,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/athosbes/invenire/internal/wire"
@@ -113,21 +125,69 @@ type Client struct {
 	base  string
 	hc    *http.Client
 	onTLS func(*tls.ConnectionState)
+	// badge é o crachá com que as requisições autenticadas são assinadas:
+	// o mesmo do mTLS (cfg.Certificates[0]). Nulo antes do cadastro.
+	badge *tls.Certificate
+
+	mu sync.Mutex
+	// skew é quanto o relógio do servidor está à frente do nosso, pelo
+	// cabeçalho Date da última resposta. Corrige o timestamp da assinatura
+	// numa máquina de relógio errado.
+	skew time.Duration
+	// Now substitui time.Now nos testes.
+	Now func() time.Time
 }
 
-// NewClient valida a URL do servidor e monta o cliente com o TLS dado.
+// NewClient valida a URL do servidor e monta o cliente com o TLS dado. Se
+// cfg trouxer o crachá (Certificates), as requisições autenticadas também
+// são assinadas com ele.
 func NewClient(serverURL string, cfg *tls.Config) (*Client, error) {
 	u, err := url.Parse(serverURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return nil, fmt.Errorf("URL do servidor inválida (precisa ser https://host[:porta]): %q", serverURL)
 	}
-	return &Client{
+	c := &Client{
 		base: strings.TrimRight(u.String(), "/"),
 		hc: &http.Client{
 			Timeout:   5 * time.Minute,
 			Transport: &http.Transport{TLSClientConfig: cfg, ForceAttemptHTTP2: true},
 		},
-	}, nil
+		Now: time.Now,
+	}
+	if cfg != nil && len(cfg.Certificates) > 0 && len(cfg.Certificates[0].Certificate) > 0 {
+		c.badge = &cfg.Certificates[0]
+	}
+	return c, nil
+}
+
+// SignRequest põe em req os cabeçalhos da assinatura com o crachá badge.
+// path é o caminho da API (wire.Path*), sem o prefixo que a URL do servidor
+// possa ter; body, os bytes exatos do corpo enviado.
+func SignRequest(req *http.Request, badge *tls.Certificate, path string, body []byte, now time.Time) error {
+	signer, ok := badge.PrivateKey.(crypto.Signer)
+	if !ok || len(badge.Certificate) == 0 {
+		return errors.New("crachá sem chave para assinar")
+	}
+	ts := now.UTC().Format(time.RFC3339)
+	msg := wire.SignedMessage(req.Method, path, ts, body)
+	var sig []byte
+	var err error
+	switch signer.Public().(type) {
+	case ed25519.PublicKey:
+		sig, err = signer.Sign(rand.Reader, msg, crypto.Hash(0))
+	case *ecdsa.PublicKey, *rsa.PublicKey:
+		h := sha256.Sum256(msg)
+		sig, err = signer.Sign(rand.Reader, h[:], crypto.SHA256)
+	default:
+		return fmt.Errorf("tipo de chave do crachá não suportado: %T", signer.Public())
+	}
+	if err != nil {
+		return fmt.Errorf("assinar a requisição: %w", err)
+	}
+	req.Header.Set(wire.AgentCertHeader, base64.StdEncoding.EncodeToString(badge.Certificate[0]))
+	req.Header.Set(wire.TimestampHeader, ts)
+	req.Header.Set(wire.SignatureHeader, base64.StdEncoding.EncodeToString(sig))
+	return nil
 }
 
 // Enroll faz o cadastro.
@@ -184,6 +244,29 @@ func (c *Client) SendSnapshot(ctx context.Context, body []byte, sum string) (wir
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body []byte, hdr map[string]string, out any) error {
+	sign := c.badge != nil && path != wire.PathEnroll
+	skew := c.clockSkew()
+	err := c.try(ctx, method, path, body, hdr, sign, out)
+	// Um 401 de requisição assinada pode ser só o relógio desta máquina fora
+	// da janela do servidor. Se a resposta mostrou que o relógio está mesmo
+	// longe do servidor, tenta uma vez com o timestamp corrigido. Sem isso, o
+	// agente tomaria o 401 por revogação e pararia.
+	var he *HTTPError
+	if sign && errors.As(err, &he) && he.Status == http.StatusUnauthorized {
+		if d := c.clockSkew() - skew; d > time.Minute || d < -time.Minute {
+			err = c.try(ctx, method, path, body, hdr, sign, out)
+		}
+	}
+	return err
+}
+
+func (c *Client) clockSkew() time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.skew
+}
+
+func (c *Client) try(ctx context.Context, method, path string, body []byte, hdr map[string]string, sign bool, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -191,11 +274,25 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, hdr m
 	for k, v := range hdr {
 		req.Header.Set(k, v)
 	}
+	if sign {
+		if err := SignRequest(req, c.badge, path, body, c.Now().Add(c.clockSkew())); err != nil {
+			return err
+		}
+	}
+	sent := c.Now()
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	if d, err := http.ParseTime(resp.Header.Get("Date")); err == nil {
+		// Date tem resolução de um segundo; o ponto médio entre envio e
+		// resposta aproxima a hora a que ele se refere.
+		mid := sent.Add(c.Now().Sub(sent) / 2)
+		c.mu.Lock()
+		c.skew = d.Sub(mid).Truncate(time.Second)
+		c.mu.Unlock()
+	}
 	if c.onTLS != nil && resp.TLS != nil {
 		c.onTLS(resp.TLS)
 	}

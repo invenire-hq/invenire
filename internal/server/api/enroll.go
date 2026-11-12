@@ -202,7 +202,8 @@ func (s *Server) renewAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "corpo inválido: "+err.Error())
 		return
 	}
-	presented := pki.Fingerprint(r.TLS.PeerCertificates[0].Raw)
+	auth := authFrom(r.Context())
+	presented := pki.Fingerprint(auth.cert.Raw)
 
 	var resp wire.RenewResponse
 	err := s.inTx(r.Context(), func(q *store.Queries) error {
@@ -219,10 +220,12 @@ func (s *Server) renewAgent(w http.ResponseWriter, r *http.Request) {
 			return errorf(http.StatusBadRequest, "%s", err)
 		}
 		if _, err := q.RenewAgentCert(r.Context(), store.RenewAgentCertParams{
-			ID: agent.ID, Presented: presented, CertFingerprint: certFP, TenantCaID: &caID,
+			ID: agent.ID, Presented: presented, CertFingerprint: certFP, TenantCaID: &caID, SignedAt: auth.signedAt,
 		}); errors.Is(err, pgx.ErrNoRows) {
-			// Revogado, ou outra renovação trocou o crachá, entre o agentAuth e aqui.
-			return errorf(http.StatusUnauthorized, "agente desconhecido ou revogado")
+			// Revogado, ou outra renovação trocou o crachá, entre o agentAuth e
+			// aqui; ou, na assinatura, timestamp não maior que o da última
+			// renovação assinada (requisição repetida, migração 00011).
+			return errorf(http.StatusUnauthorized, "agente desconhecido ou revogado, ou renovação repetida")
 		} else if err != nil {
 			return err
 		}

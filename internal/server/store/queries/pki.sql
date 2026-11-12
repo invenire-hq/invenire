@@ -39,13 +39,19 @@ WHERE (g.cert_fingerprint = sqlc.arg(fingerprint)::text OR g.prev_cert_fingerpri
 -- Troca o crachá do agente. presented é o crachá com que ele se apresentou:
 -- se for o atual, vira o anterior; se já for o anterior (a resposta da
 -- renovação passada se perdeu), continua sendo, e só o atual é trocado.
+-- signed_at é o timestamp da requisição assinada (nulo no mTLS): só passa se
+-- for maior que o da última renovação assinada, o que barra a repetição de
+-- uma renovação capturada.
 UPDATE agent SET
   prev_cert_fingerprint = CASE WHEN cert_fingerprint = sqlc.arg(presented)::text THEN cert_fingerprint ELSE prev_cert_fingerprint END,
   prev_tenant_ca_id     = CASE WHEN cert_fingerprint = sqlc.arg(presented)::text THEN tenant_ca_id ELSE prev_tenant_ca_id END,
   cert_fingerprint      = sqlc.arg(cert_fingerprint),
-  tenant_ca_id          = sqlc.arg(tenant_ca_id)
+  tenant_ca_id          = sqlc.arg(tenant_ca_id),
+  last_renew_signed_at  = coalesce(sqlc.narg(signed_at)::timestamptz, last_renew_signed_at)
 WHERE id = sqlc.arg(id) AND revoked_at IS NULL
   AND (cert_fingerprint = sqlc.arg(presented)::text OR prev_cert_fingerprint = sqlc.arg(presented)::text)
+  AND (sqlc.narg(signed_at)::timestamptz IS NULL OR last_renew_signed_at IS NULL
+       OR last_renew_signed_at < sqlc.narg(signed_at)::timestamptz)
 RETURNING id;
 
 -- name: RevokeTenantCA :exec
