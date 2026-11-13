@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/athosbes/invenire/internal/server/api"
+	"github.com/athosbes/invenire/internal/server/download"
 	"github.com/athosbes/invenire/internal/server/store"
 )
 
@@ -46,6 +47,9 @@ type Config struct {
 	// Stale é quanto tempo sem notícia do agente o torna atrasado na visão
 	// geral (o --stale do status).
 	Stale time.Duration
+	// Agents são os executáveis do agente que o servidor distribui (rotas
+	// /download/ e pacote do instalador). Nil = nenhum; o painel explica.
+	Agents *download.Agents
 	// Now, para os testes.
 	Now func() time.Time
 }
@@ -65,6 +69,7 @@ type Panel struct {
 	loginLimit *limiter
 	setupLimit *limiter
 	exports    *exportKeys
+	agents     *download.Agents
 }
 
 // New monta o painel.
@@ -78,6 +83,10 @@ func New(cfg Config) (*Panel, error) {
 		loginLimit: newLimiter(10, 15*time.Minute),
 		setupLimit: newLimiter(10, 15*time.Minute),
 		exports:    &exportKeys{m: map[string]exportKey{}},
+		agents:     cfg.Agents,
+	}
+	if p.agents == nil {
+		p.agents = download.Open("")
 	}
 	if p.log == nil {
 		p.log = slog.Default()
@@ -134,6 +143,13 @@ func (p *Panel) Handler() http.Handler {
 		files.ServeHTTP(w, r)
 	}))
 
+	// O agente e os scripts não são segredo: rotas públicas. O pacote com o
+	// token é outra coisa (POST /enroll/package, só administrador).
+	mux.HandleFunc("GET /download/agent/{platform}", p.agents.ServeAgent)
+	mux.HandleFunc("GET /download/SHA256SUMS", p.agents.ServeSums)
+	mux.HandleFunc("GET /download/instalar.ps1", p.installScript("ps1"))
+	mux.HandleFunc("GET /download/instalar.sh", p.installScript("sh"))
+
 	mux.HandleFunc("GET /setup", p.setupForm)
 	mux.HandleFunc("POST /setup", p.setupSubmit)
 	mux.HandleFunc("GET /login", p.loginForm)
@@ -146,6 +162,7 @@ func (p *Panel) Handler() http.Handler {
 	mux.Handle("GET /{$}", read(p.overview))
 	mux.Handle("GET /enroll", read(p.enrollPage))
 	mux.Handle("POST /enroll", admin(p.enrollCreate))
+	mux.Handle("POST /enroll/package", admin(p.enrollPackage))
 	mux.Handle("POST /enroll/{id}/revoke", admin(p.enrollRevoke))
 	mux.Handle("GET /assets", read(p.assetsPage))
 	mux.Handle("GET /assets/{id}", read(p.assetPage))

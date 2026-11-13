@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/athosbes/invenire/internal/server/api"
+	"github.com/athosbes/invenire/internal/server/download"
 	"github.com/athosbes/invenire/internal/server/pki"
 	"github.com/athosbes/invenire/internal/server/store"
 	"github.com/athosbes/invenire/internal/server/web"
@@ -43,11 +45,23 @@ type env struct {
 	api  *api.Server
 	srv  *httptest.Server
 	ca   *pki.CA
+
+	urlsMu sync.Mutex
+	urls   []string
 }
 
 // newEnv sobe API e painel como o serve: a API em /v1/ e /healthz, o painel
-// no resto, sobre TLS.
-func newEnv(t *testing.T) *env {
+// no resto, sobre TLS, com a CA da instalação (modo pin).
+func newEnv(t *testing.T) *env { return newEnvWith(t, envOpts{}) }
+
+type envOpts struct {
+	// public: o servidor usa um certificado "público" (de uma CA que não é a
+	// da instalação), sem pin, como com --tls-cert ou atrás de proxy.
+	public bool
+	agents *download.Agents
+}
+
+func newEnvWith(t *testing.T, o envOpts) *env {
 	pool := testdb.New(t)
 	ca, err := pki.LoadOrCreate(t.TempDir())
 	if err != nil {
@@ -58,11 +72,15 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s, err := api.New(pool, api.Config{ServerCA: ca, MasterKey: mk}, log)
+	cfg := api.Config{ServerCA: ca, MasterKey: mk}
+	if o.public {
+		cfg.ServerCA = nil
+	}
+	s, err := api.New(pool, cfg, log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	panel, err := web.New(web.Config{API: s, Log: log, SetupCode: setupCode})
+	panel, err := web.New(web.Config{API: s, Log: log, SetupCode: setupCode, Agents: o.agents})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,11 +92,20 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewUnstartedServer(root)
+	e := &env{t: t, pool: pool, q: store.New(pool), api: s, ca: ca}
+	// Toda URL pedida fica registrada: o token de cadastro não pode aparecer
+	// em nenhuma (URL vai para log de proxy).
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		e.urlsMu.Lock()
+		e.urls = append(e.urls, r.URL.String())
+		e.urlsMu.Unlock()
+		root.ServeHTTP(w, r)
+	}))
 	srv.TLS = s.TLSConfig(cert)
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
-	return &env{t: t, pool: pool, q: store.New(pool), api: s, srv: srv, ca: ca}
+	e.srv = srv
+	return e
 }
 
 // browser é um navegador: guarda cookies e não segue redirecionamentos, para

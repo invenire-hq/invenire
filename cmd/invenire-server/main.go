@@ -40,6 +40,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/athosbes/invenire/internal/server/api"
+	"github.com/athosbes/invenire/internal/server/download"
 	"github.com/athosbes/invenire/internal/server/export"
 	"github.com/athosbes/invenire/internal/server/ingest"
 	"github.com/athosbes/invenire/internal/server/normalize"
@@ -62,6 +63,10 @@ comandos:
   serve --behind-proxy --trusted-proxies <CIDRs>
                               sobe a API em HTTP puro, atrás de um proxy
                               reverso que termina o TLS (Nginx, Caddy…)
+  serve --agent-dir <pasta>   pasta com os executáveis do agente e o SHA256SUMS
+                              (padrão: INVENIRE_AGENT_DIR, ou a da imagem
+                              Docker); o painel monta deles o pacote do
+                              instalador, e /download/ os entrega
   tenant create [--admin-email <e-mail> --admin-name <nome>] <nome>
                               cria um tenant; com --admin-email, também o
                               primeiro administrador do painel
@@ -184,6 +189,8 @@ func runServe(ctx context.Context, args []string) error {
 	minConf := fs.Float64("auto-map-confidence", normalize.DefaultMinConfidence,
 		"confiança mínima para uma regra mapear software sem revisão (0 a 1)")
 	stale := fs.Duration("stale", 12*time.Hour, "no painel, sem notícia do agente por mais que isto = atrasado")
+	agentDir := fs.String("agent-dir", envOr(agentDirEnv, download.DefaultDir),
+		"pasta com os executáveis do agente e o SHA256SUMS (a de scripts/build.sh serve), distribuídos em /download/ e no pacote do instalador")
 	fs.Parse(args)
 	if *minConf <= 0 || *minConf > 1 {
 		return errors.New("--auto-map-confidence precisa estar entre 0 (exclusive) e 1")
@@ -298,7 +305,15 @@ func runServe(ctx context.Context, args []string) error {
 		}
 		log.Warn("primeira configuração: abra o painel no navegador (/setup) e use este código", "codigo", setupCode)
 	}
-	panel, err := web.New(web.Config{API: srv, Log: log, SetupCode: setupCode, Stale: *stale})
+	// Os executáveis do agente que o servidor distribui. Sem eles, o servidor
+	// funciona; o painel explica o que falta.
+	agents := download.Open(*agentDir)
+	if p := agents.Problem(); p != "" {
+		log.Warn("sem executáveis do agente para distribuir: o painel não oferece o pacote do instalador", "agent_dir", *agentDir, "motivo", p)
+	} else if m := agents.Missing(); len(m) > 0 {
+		log.Warn("executáveis do agente faltando", "agent_dir", *agentDir, "faltam", m)
+	}
+	panel, err := web.New(web.Config{API: srv, Log: log, SetupCode: setupCode, Stale: *stale, Agents: agents})
 	if err != nil {
 		return err
 	}
@@ -353,6 +368,16 @@ func runServe(ctx context.Context, args []string) error {
 		return err
 	}
 	return nil
+}
+
+// agentDirEnv é o padrão do --agent-dir.
+const agentDirEnv = "INVENIRE_AGENT_DIR"
+
+func envOr(name, def string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
 }
 
 // setupCodeEnv dá o código da primeira configuração, em vez de um gerado.

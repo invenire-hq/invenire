@@ -90,6 +90,8 @@ type newToken struct {
 	Unit   string
 	Server string
 	Pin    string
+	// As formas de instalar (install.go).
+	Install installView
 }
 
 type enrollView struct {
@@ -185,6 +187,7 @@ func (p *Panel) enrollCreate(w http.ResponseWriter, r *http.Request, s *session)
 		return
 	}
 	v.New = &newToken{NewToken: tok, Uses: uses, Server: serverURL(r), Pin: p.api.CAPin()}
+	v.New.Install = p.installView(v.New.Server, v.New.Pin)
 	for _, u := range v.Units {
 		if unit != nil && u.ID == *unit {
 			v.New.Unit = u.Path

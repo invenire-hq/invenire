@@ -430,6 +430,14 @@ func IssueEnrollmentToken(ctx context.Context, q *store.Queries, actor *uuid.UUI
 	return tok, err
 }
 
+// LogInstallerPackage registra que o painel montou um pacote do instalador
+// com um token de cadastro: o pacote leva o token, e quem o baixou fica no
+// change_log como quem criou o token.
+func LogInstallerPackage(ctx context.Context, q *store.Queries, tenant uuid.UUID, actor *uuid.UUID, token uuid.UUID, system string) error {
+	_, err := logChange(ctx, q, tenant, "enrollment_package_downloaded", actor, nil, map[string]any{"token_id": token, "os": system})
+	return err
+}
+
 // RevokeEnrollmentToken revoga um token de cadastro do tenant; as máquinas
 // já cadastradas continuam. actor nulo = linha de comando.
 func RevokeEnrollmentToken(ctx context.Context, q *store.Queries, tenant uuid.UUID, actor *uuid.UUID, id uuid.UUID) (store.RevokeEnrollmentTokenRow, error) {

@@ -175,6 +175,38 @@ func (q *Queries) GetAsset(ctx context.Context, id uuid.UUID) (Asset, error) {
 	return i, err
 }
 
+const getEnrollmentTokenByHash = `-- name: GetEnrollmentTokenByHash :one
+SELECT id, max_uses, uses, expires_at FROM enrollment_token
+WHERE token_hash = $1 AND tenant_id = $2
+  AND uses < max_uses AND revoked_at IS NULL AND expires_at > now()
+`
+
+type GetEnrollmentTokenByHashParams struct {
+	TokenHash []byte
+	TenantID  uuid.UUID
+}
+
+type GetEnrollmentTokenByHashRow struct {
+	ID        uuid.UUID
+	MaxUses   int32
+	Uses      int32
+	ExpiresAt time.Time
+}
+
+// Para o painel montar o pacote do instalador: o token vem do formulário (o
+// banco só guarda o hash) e tem de ser deste tenant e ainda valer.
+func (q *Queries) GetEnrollmentTokenByHash(ctx context.Context, arg GetEnrollmentTokenByHashParams) (GetEnrollmentTokenByHashRow, error) {
+	row := q.db.QueryRow(ctx, getEnrollmentTokenByHash, arg.TokenHash, arg.TenantID)
+	var i GetEnrollmentTokenByHashRow
+	err := row.Scan(
+		&i.ID,
+		&i.MaxUses,
+		&i.Uses,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const getLastSnapshotHash = `-- name: GetLastSnapshotHash :one
 SELECT sha256 FROM snapshot
 WHERE asset_id = $1

@@ -107,3 +107,10 @@ ORDER BY t.created_at DESC, t.id;
 UPDATE enrollment_token SET revoked_at = now()
 WHERE id = @id AND tenant_id = @tenant_id AND revoked_at IS NULL
 RETURNING id, uses, max_uses;
+
+-- name: GetEnrollmentTokenByHash :one
+-- Para o painel montar o pacote do instalador: o token vem do formulário (o
+-- banco só guarda o hash) e tem de ser deste tenant e ainda valer.
+SELECT id, max_uses, uses, expires_at FROM enrollment_token
+WHERE token_hash = @token_hash AND tenant_id = @tenant_id
+  AND uses < max_uses AND revoked_at IS NULL AND expires_at > now();

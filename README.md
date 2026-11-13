@@ -24,12 +24,14 @@ A arquitetura e o modelo de dados estão no documento
 - [x] Exportação do tenant (`tenant export`, `tenant verify`, `GET /v1/export`) com formato documentado em [docs/exportacao.md](docs/exportacao.md); importação ainda não
 - [x] Pacote do piloto: imagem Docker e compose do servidor, backup e restauração, scripts de instalação do agente, token de vários usos com revogação, `invenire-server status` e `scripts/build.sh` ([docs/piloto.md](docs/piloto.md))
 - [x] Painel web no próprio servidor: primeira configuração, login com e-mail e senha, visão geral, tokens de cadastro, máquinas, unidades, software, acesso e exportação ([Painel web](#painel-web))
+- [x] Instalador pré-configurado do agente: o servidor distribui o agente (`/download/`), e o painel monta na hora um pacote `.zip`/`.tar.gz` com endereço, pin e token, ou mostra um comando de uma linha ([Instalar o agente pelo painel](#instalar-o-agente-pelo-painel))
 
 ## Piloto
 
 Para instalar de verdade num grupo de máquinas, siga [docs/piloto.md](docs/piloto.md): o
 servidor sobe com Docker (`deploy/piloto`, com backup e restauração), as máquinas instalam com
-`instalar.ps1` ou `instalar.sh` a partir da pasta gerada por `scripts/build.sh`, e o
+o pacote baixado do painel (ou com `instalar.ps1`/`instalar.sh` a partir da pasta gerada por
+`scripts/build.sh`), e o
 `invenire-server status` mostra quem está em dia. A seção abaixo é o caminho manual, para
 desenvolvimento ou para entender cada peça.
 
@@ -77,6 +79,43 @@ confiável: use um certificado público (`--tls-cert` ou proxy reverso) para o p
 aviso. O servidor também pede certificado cliente no TLS (por causa do mTLS dos agentes), e alguns
 navegadores com certificado digital instalado (e-CPF, e-CNPJ) mostram um seletor: cancele.
 Atrás de proxy (`--behind-proxy`) nada disso acontece; o proxy precisa repassar o `Host`.
+
+### Instalar o agente pelo painel
+
+A imagem Docker traz os executáveis do agente (Windows amd64, Linux amd64 e arm64) com o
+`SHA256SUMS`, e o servidor os entrega em rotas públicas: `GET /download/agent/{so}-{arq}`
+(`windows-amd64`, `linux-amd64`, `linux-arm64`), `GET /download/SHA256SUMS` e os scripts
+`GET /download/instalar.ps1` e `/download/instalar.sh`, já com o endereço (e o pin, se houver)
+preenchidos. Fora do Docker, aponte `serve --agent-dir` (ou `INVENIRE_AGENT_DIR`) para a pasta de
+`scripts/build.sh`; sem os executáveis, o servidor sobe assim mesmo, avisa no log, e o painel
+explica o que falta.
+
+Ao criar um token em **Adicionar máquinas**, o painel mostra três formas de instalar:
+
+1. **Pacote para baixar.** `.zip` para Windows (extrair e dar dois cliques em `Instalar.cmd`, que
+   pede permissão de administrador e chama o `instalar.ps1` com `-ExecutionPolicy Bypass`) e
+   `.tar.gz` para Linux (`sudo ./invenire-agente/instalar.sh`). Leva o agente, o script, o
+   `SHA256SUMS` e o `instalar.conf` com endereço, pin e token: nada a digitar, funciona nos dois
+   modos de TLS e sem internet. Depois de instalar, o script apaga o `instalar.conf` se o token era
+   de uma máquina só; se ainda cadastra outras, só avisa.
+2. **Comando de uma linha**, só com certificado público (direto com `--tls-cert` ou atrás de
+   proxy): com pin, o download não teria como conferir o servidor. O token vai numa variável de
+   ambiente, nunca na URL:
+   `curl -fsSL https://invenire.exemplo.org/download/instalar.sh | sudo INVENIRE_ENROLL_TOKEN=inv_... sh`
+   (no Windows, o equivalente com `irm` no PowerShell como administrador).
+3. **Manual**: os comandos de sempre, na pasta da versão.
+
+**Como o pacote é gerado sem guardar o token.** O banco guarda só o hash do token, e ele aparece
+uma vez. O botão de baixar é um formulário POST que devolve ao servidor o token que a página está
+mostrando (no corpo, não na URL), com a sessão de administrador e o CSRF. O servidor confere pelo
+hash que o token é da organização da sessão e ainda vale, monta o pacote em memória e o entrega;
+nada fica guardado. Recarregou a página, o token sumiu da tela: para outro pacote, crie outro
+token. Cada pacote baixado fica no `change_log` (`enrollment_package_downloaded`).
+
+O pacote contém o token: vale prazo curto, poucos usos e revogar se vazar. Os executáveis não têm
+assinatura de código: o Windows pode mostrar o SmartScreen ("Mais informações" > "Executar assim
+mesmo") e algum antivírus pode bloquear o `invenire-agent.exe`. Os scripts conferem o executável
+contra o `SHA256SUMS` antes de rodar, e rodar de novo não recadastra a máquina.
 
 ## Do zero à primeira máquina
 

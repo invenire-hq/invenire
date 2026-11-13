@@ -34,19 +34,60 @@
   <h3>{{t "enroll.how"}}</h3>
   <p>{{t "enroll.how_intro"}}</p>
 
-  <h4>{{t "enroll.windows"}}</h4>
-  <p class="hint">{{t "enroll.windows_hint"}}</p>
-  <pre id="cmd-win">$env:INVENIRE_ENROLL_TOKEN = "{{.Token}}"
-.\instalar.ps1 -Server {{.Server}}{{if .Pin}} -CaPin {{.Pin}}{{end}}</pre>
-  <button type="button" data-copy="cmd-win">{{t "action.copy"}}</button>
+  <h4>{{t "install.package_title"}}</h4>
+  {{if .Install.Problem}}
+  <p class="warn">{{t "install.no_agents"}}</p>
+  <p class="hint">{{t "install.no_agents_why"}} <code>{{.Install.Problem}}</code></p>
+  {{else}}
+  <p>{{t "install.package_intro"}}</p>
+  <p class="warn">{{t "install.package_token"}}{{if gt .Uses 1}} {{t "install.package_many"}}{{end}}</p>
+  <div class="row">
+    {{if .Install.Windows}}
+    <form method="post" action="/enroll/package" target="_blank">
+      {{template "csrf" $}}<input type="hidden" name="token" value="{{.Token}}"><input type="hidden" name="so" value="windows">
+      <button class="primary">{{t "install.package_windows"}}</button>
+    </form>
+    {{end}}
+    {{if .Install.Linux}}
+    <form method="post" action="/enroll/package" target="_blank">
+      {{template "csrf" $}}<input type="hidden" name="token" value="{{.Token}}"><input type="hidden" name="so" value="linux">
+      <button class="primary">{{t "install.package_linux"}}</button>
+    </form>
+    {{end}}
+  </div>
+  <p class="hint">{{t "install.package_windows_how"}}</p>
+  <p class="hint">{{t "install.package_linux_how"}}</p>
+  <p class="hint">{{t "install.unsigned"}}</p>
+  {{end}}
 
-  <h4>{{t "enroll.linux"}}</h4>
-  <p class="hint">{{t "enroll.linux_hint"}}</p>
-  <pre id="cmd-linux">sudo INVENIRE_ENROLL_TOKEN={{.Token}} ./instalar.sh --server {{.Server}}{{if .Pin}} --ca-pin {{.Pin}}{{end}}</pre>
-  <button type="button" data-copy="cmd-linux">{{t "action.copy"}}</button>
+  <h4>{{t "install.oneline_title"}}</h4>
+  {{if .Install.OneLine}}
+  <p>{{t "install.oneline_intro"}}</p>
+  <p class="hint">{{t "install.oneline_windows"}}</p>
+  <pre id="cmd-1-win">$env:INVENIRE_ENROLL_TOKEN = "{{.Token}}"; [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; &amp; ([scriptblock]::Create((irm {{.Install.ScriptPS1}})))</pre>
+  <button type="button" data-copy="cmd-1-win">{{t "action.copy"}}</button>
+  <p class="hint">{{t "install.oneline_linux"}}</p>
+  <pre id="cmd-1-linux">curl -fsSL {{.Install.ScriptSH}} | sudo INVENIRE_ENROLL_TOKEN={{.Token}} sh</pre>
+  <button type="button" data-copy="cmd-1-linux">{{t "action.copy"}}</button>
+  {{else}}
+  <p class="hint">{{t "install.oneline_pin"}}</p>
+  {{end}}
 
   <details>
-    <summary>{{t "enroll.manual"}}</summary>
+    <summary>{{t "install.manual_title"}}</summary>
+    <p>{{t "install.manual_intro"}}</p>
+    <h4>{{t "enroll.windows"}}</h4>
+    <p class="hint">{{t "enroll.windows_hint"}}</p>
+    <pre id="cmd-win">$env:INVENIRE_ENROLL_TOKEN = "{{.Token}}"
+.\instalar.ps1 -Server {{.Server}}{{if .Pin}} -CaPin {{.Pin}}{{end}}</pre>
+    <button type="button" data-copy="cmd-win">{{t "action.copy"}}</button>
+
+    <h4>{{t "enroll.linux"}}</h4>
+    <p class="hint">{{t "enroll.linux_hint"}}</p>
+    <pre id="cmd-linux">sudo INVENIRE_ENROLL_TOKEN={{.Token}} ./instalar.sh --server {{.Server}}{{if .Pin}} --ca-pin {{.Pin}}{{end}}</pre>
+    <button type="button" data-copy="cmd-linux">{{t "action.copy"}}</button>
+
+    <h4>{{t "enroll.manual"}}</h4>
     <p class="hint">{{t "enroll.manual_hint"}}</p>
     <pre id="cmd-manual">invenire-agent enroll --server {{.Server}}{{if .Pin}} --ca-pin {{.Pin}}{{end}} --token {{.Token}}
 invenire-agent service install</pre>

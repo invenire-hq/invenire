@@ -73,6 +73,16 @@ postas depois pela API (`PUT /v1/assets/{id}/unit`).
 
 ## 4. Instalar nas máquinas
 
+**Pelo painel (o mais simples).** Crie o token em Adicionar máquinas e, na mesma tela, baixe o
+pacote: no Windows, extraia o `.zip` e dê dois cliques em `Instalar.cmd`; no Linux,
+`tar xzf invenire-agente-linux.tar.gz && sudo ./invenire-agente/instalar.sh`. O pacote já traz
+endereço, pin, token e o executável. Com um token de várias máquinas, o mesmo pacote (num
+pendrive, por exemplo) serve a todas; guarde-o como uma senha e apague-o no fim do lote. Com
+certificado público, a tela também mostra um comando de uma linha. Detalhes no README
+("Instalar o agente pelo painel").
+
+**Pela pasta da versão**, com os comandos de sempre:
+
 **Windows** (PowerShell **como administrador**, na pasta da versão):
 
 ```powershell
@@ -86,7 +96,7 @@ $env:INVENIRE_ENROLL_TOKEN = "inv_..."
 sudo INVENIRE_ENROLL_TOKEN=inv_... ./instalar.sh --server https://invenire.prefeitura.local:8443 --ca-pin sha256:...
 ```
 
-O script confere o executável, cadastra, instala o serviço e confirma que ele está rodando.
+Nos dois casos, o script confere o executável, cadastra, instala o serviço e confirma que ele está rodando.
 Rodar de novo não cadastra outra vez: só atualiza o serviço para o executável da pasta. É
 assim que se atualiza o agente numa versão nova. `-Force` / `--force` cadastra de novo e
 revoga o crachá anterior da máquina.
