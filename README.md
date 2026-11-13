@@ -23,6 +23,7 @@ A arquitetura e o modelo de dados estão no documento
 - [x] Rotas de consulta: ativos (com filtro por unidade, etiqueta e software), software de um ativo, histórico, produtos e instalações de um produto, fluxo de mudanças
 - [x] Exportação do tenant (`tenant export`, `tenant verify`, `GET /v1/export`) com formato documentado em [docs/exportacao.md](docs/exportacao.md); importação ainda não
 - [x] Pacote do piloto: imagem Docker e compose do servidor, backup e restauração, scripts de instalação do agente, token de vários usos com revogação, `invenire-server status` e `scripts/build.sh` ([docs/piloto.md](docs/piloto.md))
+- [x] Painel web no próprio servidor: primeira configuração, login com e-mail e senha, visão geral, tokens de cadastro, máquinas, unidades, software, acesso e exportação ([Painel web](#painel-web))
 
 ## Piloto
 
@@ -31,6 +32,51 @@ servidor sobe com Docker (`deploy/piloto`, com backup e restauração), as máqu
 `instalar.ps1` ou `instalar.sh` a partir da pasta gerada por `scripts/build.sh`, e o
 `invenire-server status` mostra quem está em dia. A seção abaixo é o caminho manual, para
 desenvolvimento ou para entender cada peça.
+
+## Painel web
+
+O `invenire-server` serve um painel no navegador, na mesma porta da API: a API fica em `/v1`, o
+painel em `/`. Não há nada a instalar à parte: HTML, estilo e o pouco de JavaScript vão dentro do
+binário.
+
+**Primeira configuração.** Numa instalação sem nenhuma organização, o `serve` mostra no log uma
+linha `primeira configuração` com um código (ou usa o de `INVENIRE_SETUP_CODE`):
+
+```sh
+docker compose logs server | grep "primeira configuração"
+```
+
+Abra o endereço do servidor no navegador (`https://invenire.exemplo.org/` ou
+`https://10.0.0.5:8443/`): ele leva a `/setup`, que pede esse código, o nome da organização e o
+primeiro administrador (nome, e-mail e senha). Sem o código certo, ou com uma organização já
+criada, o `/setup` recusa: quem achasse primeiro uma instalação nova exposta na internet não toma
+posse dela. Em seguida o painel oferece criar a primeira unidade e o primeiro token de cadastro,
+com os comandos de instalação do agente.
+
+**Login.** Cada pessoa entra com e-mail (único na instalação) e senha (guardada com argon2id). A
+permissão é a do ator dela, como na API: `read` só consulta, `admin` também altera. A sessão
+cai depois de 12h sem uso e de 7 dias em qualquer caso, e o login trava por 15 minutos depois de
+10 senhas erradas (por e-mail e por endereço). Quem esqueceu a senha pede a quem tem acesso ao
+servidor:
+
+```sh
+invenire-server user set-password --email ana@exemplo.org   # senha de INVENIRE_PASSWORD, ou gerada e mostrada
+```
+
+A mesma organização com administrador também pode ser criada pela linha de comando:
+`tenant create --admin-email ana@exemplo.org --admin-name "Ana" "Minha Organização"`.
+
+**Telas.** Visão geral (o mesmo do `status`, com o que fazer em cada estado), Adicionar máquinas
+(tokens de cadastro: criar, listar e revogar; o token aparece uma vez), Máquinas (filtros,
+software, histórico, unidade, etiquetas, revogar o agente), Unidades, Software (instalados e não
+identificados, com mapeamento manual), Acesso (pessoas do painel e tokens de API) e Exportar.
+Toda ação passa pelas mesmas funções das rotas `/v1` e fica no `change_log` com quem fez.
+
+No modo direto, o navegador não conhece a CA da instalação e avisa que o certificado não é
+confiável: use um certificado público (`--tls-cert` ou proxy reverso) para o painel abrir sem
+aviso. O servidor também pede certificado cliente no TLS (por causa do mTLS dos agentes), e alguns
+navegadores com certificado digital instalado (e-CPF, e-CNPJ) mostram um seletor: cancele.
+Atrás de proxy (`--behind-proxy`) nada disso acontece; o proxy precisa repassar o `Host`.
 
 ## Do zero à primeira máquina
 

@@ -317,25 +317,33 @@ func scopeOf(tenant *uuid.UUID) string {
 
 // listAssets: GET /v1/assets?unit=&subtree=&hostname=&os_family=&label=k=v&software_id=&limit=&cursor=
 func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
-	actor := actorFrom(r.Context())
-	qs := r.URL.Query()
+	resp, err := s.ListAssets(r.Context(), actorFrom(r.Context()).TenantID, r.URL.Query())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ListAssets são os ativos do tenant com os filtros de GET /v1/assets.
+func (s *Server) ListAssets(ctx context.Context, tenant uuid.UUID, qs url.Values) (AssetList, error) {
 	resp := AssetList{Items: []AssetItem{}}
 	var err error
-	resp.AsOf, err = s.readQuery(r.Context(), actor.TenantID, func(q *store.Queries) error {
-		p, err := assetParams(r.Context(), q, actor.TenantID, qs)
+	resp.AsOf, err = s.readQuery(ctx, tenant, func(q *store.Queries) error {
+		p, err := assetParams(ctx, q, tenant, qs)
 		if err != nil {
 			return err
 		}
-		units, err := loadUnits(r.Context(), q, actor.TenantID, qs)
+		units, err := loadUnits(ctx, q, tenant, qs)
 		if err != nil {
 			return err
 		}
 		p.UnitMode, p.UnitIds = units.mode, units.ids
-		rows, err := q.ListAssets(r.Context(), p)
+		rows, err := q.ListAssets(ctx, p)
 		if err != nil {
 			return err
 		}
-		if resp.Items, err = assetItems(r.Context(), q, rows, units); err != nil {
+		if resp.Items, err = assetItems(ctx, q, rows, units); err != nil {
 			return err
 		}
 		if len(rows) == int(p.PageSize) {
@@ -348,11 +356,7 @@ func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp, err
 }
 
 func assetParams(ctx context.Context, q *store.Queries, tenant uuid.UUID, qs url.Values) (store.ListAssetsParams, error) {
@@ -431,20 +435,29 @@ func assetItems(ctx context.Context, q *store.Queries, rows []store.ListAssetsRo
 
 // getAsset: GET /v1/assets/{id}.
 func (s *Server) getAsset(w http.ResponseWriter, r *http.Request) {
-	actor := actorFrom(r.Context())
 	id, ok := pathID(w, r, "ativo")
 	if !ok {
 		return
 	}
+	resp, err := s.GetAsset(r.Context(), actorFrom(r.Context()).TenantID, id)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetAsset é um ativo do tenant; de outro tenant, 404.
+func (s *Server) GetAsset(ctx context.Context, tenant, id uuid.UUID) (AssetResponse, error) {
 	var resp AssetResponse
 	var err error
-	resp.AsOf, err = s.readQuery(r.Context(), actor.TenantID, func(q *store.Queries) error {
-		units, err := loadUnits(r.Context(), q, actor.TenantID, url.Values{})
+	resp.AsOf, err = s.readQuery(ctx, tenant, func(q *store.Queries) error {
+		units, err := loadUnits(ctx, q, tenant, url.Values{})
 		if err != nil {
 			return err
 		}
-		rows, err := q.ListAssets(r.Context(), store.ListAssetsParams{
-			TenantID: actor.TenantID, AssetID: &id, Labels: []string{}, UnitIds: []uuid.UUID{}, PageSize: 1,
+		rows, err := q.ListAssets(ctx, store.ListAssetsParams{
+			TenantID: tenant, AssetID: &id, Labels: []string{}, UnitIds: []uuid.UUID{}, PageSize: 1,
 		})
 		if err != nil {
 			return err
@@ -452,18 +465,14 @@ func (s *Server) getAsset(w http.ResponseWriter, r *http.Request) {
 		if len(rows) == 0 {
 			return errorf(http.StatusNotFound, "ativo não encontrado")
 		}
-		items, err := assetItems(r.Context(), q, rows, units)
+		items, err := assetItems(ctx, q, rows, units)
 		if err != nil {
 			return err
 		}
 		resp.Asset = items[0]
 		return nil
 	})
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp, err
 }
 
 // requireAsset responde 404 para ativo que não existe ou é de outro tenant.
@@ -477,16 +486,24 @@ func requireAsset(ctx context.Context, q *store.Queries, id, tenant uuid.UUID) e
 
 // assetSoftware: GET /v1/assets/{id}/software?product=&limit=&cursor=
 func (s *Server) assetSoftware(w http.ResponseWriter, r *http.Request) {
-	actor := actorFrom(r.Context())
 	id, ok := pathID(w, r, "ativo")
 	if !ok {
 		return
 	}
-	qs := r.URL.Query()
+	resp, err := s.AssetSoftware(r.Context(), actorFrom(r.Context()).TenantID, id, r.URL.Query())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// AssetSoftware é o que está instalado agora num ativo do tenant.
+func (s *Server) AssetSoftware(ctx context.Context, tenant, id uuid.UUID, qs url.Values) (AssetSoftwareList, error) {
 	resp := AssetSoftwareList{AssetID: id, Items: []InstalledItem{}}
 	var err error
-	resp.AsOf, err = s.readQuery(r.Context(), actor.TenantID, func(q *store.Queries) error {
-		if err := requireAsset(r.Context(), q, id, actor.TenantID); err != nil {
+	resp.AsOf, err = s.readQuery(ctx, tenant, func(q *store.Queries) error {
+		if err := requireAsset(ctx, q, id, tenant); err != nil {
 			return err
 		}
 		p := store.ListAssetSoftwareParams{AssetID: id, Product: likePattern(qs, "product")}
@@ -497,7 +514,7 @@ func (s *Server) assetSoftware(w http.ResponseWriter, r *http.Request) {
 		if p.AfterKey, p.AfterID, err = parseKeyCursor(qs); err != nil {
 			return err
 		}
-		rows, err := q.ListAssetSoftware(r.Context(), p)
+		rows, err := q.ListAssetSoftware(ctx, p)
 		if err != nil {
 			return err
 		}
@@ -516,11 +533,7 @@ func (s *Server) assetSoftware(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp, err
 }
 
 // changeParams lê ?after= (id do último evento visto), ?kind= (repetível) e
@@ -550,45 +563,47 @@ func changeList(rows []store.ChangeLog, after int64, limit int32) ChangeList {
 
 // assetHistory: GET /v1/assets/{id}/history?since=&kind=&after=&limit=
 func (s *Server) assetHistory(w http.ResponseWriter, r *http.Request) {
-	actor := actorFrom(r.Context())
 	id, ok := pathID(w, r, "ativo")
 	if !ok {
 		return
 	}
-	qs := r.URL.Query()
-	after, kinds, limit, err := changeParams(qs)
+	resp, err := s.AssetHistory(r.Context(), actorFrom(r.Context()).TenantID, id, r.URL.Query())
 	if err != nil {
 		s.fail(w, r, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// AssetHistory são os eventos de um ativo do tenant no change_log.
+func (s *Server) AssetHistory(ctx context.Context, tenant, id uuid.UUID, qs url.Values) (ChangeList, error) {
+	after, kinds, limit, err := changeParams(qs)
+	if err != nil {
+		return ChangeList{}, err
 	}
 	var since *time.Time
 	if v := qs.Get("since"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
 			if t, err = time.Parse(time.DateOnly, v); err != nil {
-				writeError(w, http.StatusBadRequest, "since em RFC 3339 (2026-03-01T00:00:00-03:00) ou data (2026-03-01)")
-				return
+				return ChangeList{}, errorf(http.StatusBadRequest, "since em RFC 3339 (2026-03-01T00:00:00-03:00) ou data (2026-03-01)")
 			}
 		}
 		since = &t
 	}
 	var resp ChangeList
-	asOf, err := s.readQuery(r.Context(), actor.TenantID, func(q *store.Queries) error {
-		if err := requireAsset(r.Context(), q, id, actor.TenantID); err != nil {
+	asOf, err := s.readQuery(ctx, tenant, func(q *store.Queries) error {
+		if err := requireAsset(ctx, q, id, tenant); err != nil {
 			return err
 		}
-		rows, err := q.ListAssetChanges(r.Context(), store.ListAssetChangesParams{
-			TenantID: actor.TenantID, AssetID: &id, AfterID: after, Since: since, Kinds: kinds, PageSize: limit,
+		rows, err := q.ListAssetChanges(ctx, store.ListAssetChangesParams{
+			TenantID: tenant, AssetID: &id, AfterID: after, Since: since, Kinds: kinds, PageSize: limit,
 		})
 		resp = changeList(rows, after, limit)
 		return err
 	})
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
 	resp.AsOf = asOf
-	writeJSON(w, http.StatusOK, resp)
+	return resp, err
 }
 
 // listChanges: GET /v1/changes?after=&kind=&limit=
@@ -617,23 +632,31 @@ func (s *Server) listChanges(w http.ResponseWriter, r *http.Request) {
 // listSoftware: GET /v1/software?product=&unit=&subtree=&limit=&cursor=
 // Os produtos instalados agora nos ativos do tenant.
 func (s *Server) listSoftware(w http.ResponseWriter, r *http.Request) {
-	actor := actorFrom(r.Context())
-	qs := r.URL.Query()
+	resp, err := s.ListSoftware(r.Context(), actorFrom(r.Context()).TenantID, r.URL.Query())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ListSoftware são os produtos instalados agora nos ativos do tenant.
+func (s *Server) ListSoftware(ctx context.Context, tenant uuid.UUID, qs url.Values) (SoftwareList, error) {
 	resp := SoftwareList{Items: []SoftwareItem{}}
 	var err error
-	resp.AsOf, err = s.readQuery(r.Context(), actor.TenantID, func(q *store.Queries) error {
-		units, err := loadUnits(r.Context(), q, actor.TenantID, qs)
+	resp.AsOf, err = s.readQuery(ctx, tenant, func(q *store.Queries) error {
+		units, err := loadUnits(ctx, q, tenant, qs)
 		if err != nil {
 			return err
 		}
-		p := store.ListTenantSoftwareParams{TenantID: actor.TenantID, UnitMode: units.mode, UnitIds: units.ids, Product: likePattern(qs, "product")}
+		p := store.ListTenantSoftwareParams{TenantID: tenant, UnitMode: units.mode, UnitIds: units.ids, Product: likePattern(qs, "product")}
 		if p.PageSize, err = pageSize(qs); err != nil {
 			return err
 		}
 		if p.AfterKey, p.AfterID, err = parseKeyCursor(qs); err != nil {
 			return err
 		}
-		rows, err := q.ListTenantSoftware(r.Context(), p)
+		rows, err := q.ListTenantSoftware(ctx, p)
 		if err != nil {
 			return err
 		}
@@ -649,6 +672,16 @@ func (s *Server) listSoftware(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
+	return resp, err
+}
+
+// softwareInstallations: GET /v1/software/{id}/installations?version_id=&version=&unit=&subtree=&limit=&cursor=
+func (s *Server) softwareInstallations(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r, "produto")
+	if !ok {
+		return
+	}
+	resp, err := s.SoftwareInstallations(r.Context(), actorFrom(r.Context()).TenantID, id, r.URL.Query())
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -656,18 +689,12 @@ func (s *Server) listSoftware(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// softwareInstallations: GET /v1/software/{id}/installations?version_id=&version=&unit=&subtree=&limit=&cursor=
-func (s *Server) softwareInstallations(w http.ResponseWriter, r *http.Request) {
-	actor := actorFrom(r.Context())
-	id, ok := pathID(w, r, "produto")
-	if !ok {
-		return
-	}
-	qs := r.URL.Query()
+// SoftwareInstallations são os ativos do tenant com o produto instalado.
+func (s *Server) SoftwareInstallations(ctx context.Context, tenant, id uuid.UUID, qs url.Values) (InstallationList, error) {
 	resp := InstallationList{Versions: []VersionCount{}, Items: []InstallationItem{}}
 	var err error
-	resp.AsOf, err = s.readQuery(r.Context(), actor.TenantID, func(q *store.Queries) error {
-		sw, err := q.GetVisibleSoftware(r.Context(), store.GetVisibleSoftwareParams{ID: id, TenantID: &actor.TenantID})
+	resp.AsOf, err = s.readQuery(ctx, tenant, func(q *store.Queries) error {
+		sw, err := q.GetVisibleSoftware(ctx, store.GetVisibleSoftwareParams{ID: id, TenantID: &tenant})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errorf(http.StatusNotFound, "produto não encontrado")
 		}
@@ -675,12 +702,12 @@ func (s *Server) softwareInstallations(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		resp.Software = SoftwareRef{ID: sw.ID, Vendor: sw.Vendor, Product: sw.Product, Scope: scopeOf(sw.SoftwareTenantID)}
-		units, err := loadUnits(r.Context(), q, actor.TenantID, qs)
+		units, err := loadUnits(ctx, q, tenant, qs)
 		if err != nil {
 			return err
 		}
 		p := store.ListSoftwareInstallationsParams{
-			SoftwareID: id, TenantID: actor.TenantID, UnitMode: units.mode, UnitIds: units.ids, Version: optional(qs, "version"),
+			SoftwareID: id, TenantID: tenant, UnitMode: units.mode, UnitIds: units.ids, Version: optional(qs, "version"),
 		}
 		if v := qs.Get("version_id"); v != "" {
 			vid, err := uuid.Parse(v)
@@ -695,8 +722,8 @@ func (s *Server) softwareInstallations(w http.ResponseWriter, r *http.Request) {
 		if p.AfterKey, p.AfterID, err = parseKeyCursor(qs); err != nil {
 			return err
 		}
-		versions, err := q.ListSoftwareVersionsInTenant(r.Context(), store.ListSoftwareVersionsInTenantParams{
-			SoftwareID: id, TenantID: actor.TenantID, UnitMode: units.mode, UnitIds: units.ids,
+		versions, err := q.ListSoftwareVersionsInTenant(ctx, store.ListSoftwareVersionsInTenantParams{
+			SoftwareID: id, TenantID: tenant, UnitMode: units.mode, UnitIds: units.ids,
 		})
 		if err != nil {
 			return err
@@ -704,7 +731,7 @@ func (s *Server) softwareInstallations(w http.ResponseWriter, r *http.Request) {
 		for _, v := range versions {
 			resp.Versions = append(resp.Versions, VersionCount{ID: v.ID, Version: v.Version, PURL: v.Purl, AssetCount: v.AssetCount})
 		}
-		rows, err := q.ListSoftwareInstallations(r.Context(), p)
+		rows, err := q.ListSoftwareInstallations(ctx, p)
 		if err != nil {
 			return err
 		}
@@ -726,9 +753,5 @@ func (s *Server) softwareInstallations(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp, err
 }

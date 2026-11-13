@@ -1,0 +1,36 @@
+{{define "content"}}
+{{$d := .Data}}{{$u := $d.Unit}}
+<p class="crumbs"><a href="/units">{{t "nav.units"}}</a> ›</p>
+<h1>{{$u.Path}}</h1>
+<dl class="pairs">
+  <dt>{{t "units.kind"}}</dt><dd>{{orDash $u.Kind}}</dd>
+  <dt>{{t "units.assets"}}</dt><dd><a href="/assets?unit={{$u.ID}}">{{$u.AssetCount}}</a> {{t "units.assets_hint"}}</dd>
+  <dt>{{t "col.created"}}</dt><dd>{{when $u.CreatedAt}}</dd>
+</dl>
+
+{{if .S.Admin}}
+<section class="card">
+  <h2>{{t "units.edit"}}</h2>
+  <form method="post" action="/units/{{$u.ID}}" class="grid-form">
+    {{template "csrf" .}}
+    <label>{{t "field.name"}} <input name="name" value="{{$u.Name}}" maxlength="120" required></label>
+    <label>{{t "units.kind"}} <input name="kind" value="{{$u.Kind}}" maxlength="60"></label>
+    <label>{{t "units.parent"}}
+      <select name="parent">
+        <option value="">{{t "units.root"}}</option>
+        {{range $d.Parents}}<option value="{{.ID}}" {{if sameUnit $u.ParentID .ID}}selected{{end}}>{{.Path}}</option>{{end}}
+      </select>
+      <small>{{t "units.move_hint"}}</small>
+    </label>
+    <div><button class="primary">{{t "action.save"}}</button></div>
+  </form>
+</section>
+<section class="card">
+  <h2>{{t "units.delete"}}</h2>
+  <p class="hint">{{t "units.delete_hint"}}</p>
+  <form method="post" action="/units/{{$u.ID}}/delete" data-confirm="{{t "units.delete_confirm"}}">
+    {{template "csrf" .}}<button class="danger">{{t "units.delete"}}</button>
+  </form>
+</section>
+{{end}}
+{{end}}

@@ -1,0 +1,57 @@
+{{define "layout"}}<!doctype html>
+<html lang="{{t "lang"}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="same-origin">
+<title>{{.Title}} · Invenire</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
+{{block "head" .}}{{end}}
+</head>
+<body>
+{{if .S}}
+<header class="top">
+  <a class="brand" href="/">Invenire</a>
+  <span class="org" title="{{t "nav.organization"}}">{{.S.TenantName}}</span>
+  <nav aria-label="{{t "nav.menu"}}">
+    <a href="/" {{if eq .Nav "overview"}}aria-current="page"{{end}}>{{t "nav.overview"}}</a>
+    <a href="/enroll" {{if eq .Nav "enroll"}}aria-current="page"{{end}}>{{t "nav.enroll"}}</a>
+    <a href="/assets" {{if eq .Nav "assets"}}aria-current="page"{{end}}>{{t "nav.assets"}}</a>
+    <a href="/units" {{if eq .Nav "units"}}aria-current="page"{{end}}>{{t "nav.units"}}</a>
+    <a href="/software" {{if eq .Nav "software"}}aria-current="page"{{end}}>{{t "nav.software"}}</a>
+    {{if .S.Admin}}
+    <a href="/access" {{if eq .Nav "access"}}aria-current="page"{{end}}>{{t "nav.access"}}</a>
+    <a href="/export" {{if eq .Nav "export"}}aria-current="page"{{end}}>{{t "nav.export"}}</a>
+    {{end}}
+  </nav>
+  <div class="me">
+    {{if .S.Orgs}}
+    <form method="post" action="/organization" class="inline">
+      {{template "csrf" .}}
+      <select name="actor_id" aria-label="{{t "nav.organization"}}">
+        {{range .S.Orgs}}<option value="{{.ID}}" {{if eq .ID.String $.S.Actor.ID.String}}selected{{end}}>{{.TenantName}}</option>{{end}}
+      </select>
+      <button>{{t "nav.switch"}}</button>
+    </form>
+    {{end}}
+    <a href="/account" {{if eq .Nav "account"}}aria-current="page"{{end}}>{{.S.Actor.Name}}</a>
+    {{if not .S.Admin}}<span class="badge">{{t "scope.read"}}</span>{{end}}
+    <form method="post" action="/logout" class="inline">
+      {{template "csrf" .}}
+      <button class="link">{{t "nav.logout"}}</button>
+    </form>
+  </div>
+</header>
+{{end}}
+<main{{if not .S}} class="narrow"{{end}}>
+{{with .Flash}}<p class="flash{{if .Error}} error{{end}}" role="status">{{.Text}}</p>{{end}}
+{{template "content" .}}
+</main>
+</body>
+</html>
+{{end}}
+
+{{define "csrf"}}<input type="hidden" name="csrf" value="{{.S.CSRF}}">{{end}}
+
+{{define "state"}}<span class="state st-{{.}}">{{t (print "state." . ".label")}}</span>{{end}}

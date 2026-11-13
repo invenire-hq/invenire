@@ -142,7 +142,7 @@ func (q *Queries) FindSoftware(ctx context.Context, arg FindSoftwareParams) (Fin
 }
 
 const getActorByAPIToken = `-- name: GetActorByAPIToken :one
-SELECT a.id, a.tenant_id, a.kind, a.name, a.scopes, a.created_at, a.disabled_at FROM api_token t
+SELECT a.id, a.tenant_id, a.kind, a.name, a.scopes, a.created_at, a.disabled_at, a.login_id FROM api_token t
 JOIN actor a ON a.id = t.actor_id
 WHERE t.token_hash = $1 AND t.revoked_at IS NULL
   AND (t.expires_at IS NULL OR t.expires_at > now())
@@ -161,6 +161,7 @@ func (q *Queries) GetActorByAPIToken(ctx context.Context, tokenHash []byte) (Act
 		&i.Scopes,
 		&i.CreatedAt,
 		&i.DisabledAt,
+		&i.LoginID,
 	)
 	return i, err
 }
@@ -188,7 +189,7 @@ func (q *Queries) GetSoftwareRawForUpdate(ctx context.Context, id uuid.UUID) (So
 }
 
 const getTenantActor = `-- name: GetTenantActor :one
-SELECT id, tenant_id, kind, name, scopes, created_at, disabled_at FROM actor WHERE tenant_id = $1 AND kind = $2 AND name = $3
+SELECT id, tenant_id, kind, name, scopes, created_at, disabled_at, login_id FROM actor WHERE tenant_id = $1 AND kind = $2 AND name = $3
 `
 
 type GetTenantActorParams struct {
@@ -208,6 +209,7 @@ func (q *Queries) GetTenantActor(ctx context.Context, arg GetTenantActorParams) 
 		&i.Scopes,
 		&i.CreatedAt,
 		&i.DisabledAt,
+		&i.LoginID,
 	)
 	return i, err
 }

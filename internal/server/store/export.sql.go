@@ -14,7 +14,7 @@ import (
 )
 
 const exportActors = `-- name: ExportActors :many
-SELECT id, tenant_id, kind, name, scopes, created_at, disabled_at FROM actor WHERE tenant_id = $1 ORDER BY created_at, id
+SELECT id, tenant_id, kind, name, scopes, created_at, disabled_at, login_id FROM actor WHERE tenant_id = $1 ORDER BY created_at, id
 `
 
 func (q *Queries) ExportActors(ctx context.Context, tenantID uuid.UUID) ([]Actor, error) {
@@ -34,6 +34,7 @@ func (q *Queries) ExportActors(ctx context.Context, tenantID uuid.UUID) ([]Actor
 			&i.Scopes,
 			&i.CreatedAt,
 			&i.DisabledAt,
+			&i.LoginID,
 		); err != nil {
 			return nil, err
 		}

@@ -1,7 +1,8 @@
 // Comando invenire-server é a API central do Invenire.
 //
 //	invenire-server serve
-//	invenire-server tenant create <nome>
+//	invenire-server tenant create [--admin-email <e-mail> --admin-name <nome>] <nome>
+//	invenire-server user set-password --email <e-mail>
 //	invenire-server tenant export --tenant <nome> --out <arquivo>
 //	invenire-server tenant verify <arquivo>
 //	invenire-server token create --tenant <nome> [--unit Saúde/UBS Centro]
@@ -12,6 +13,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"database/sql"
@@ -34,7 +36,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -44,6 +45,7 @@ import (
 	"github.com/athosbes/invenire/internal/server/normalize"
 	"github.com/athosbes/invenire/internal/server/pki"
 	"github.com/athosbes/invenire/internal/server/store"
+	"github.com/athosbes/invenire/internal/server/web"
 	"github.com/athosbes/invenire/migrations"
 )
 
@@ -54,11 +56,18 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `uso: invenire-server <comando> [opções]
 
 comandos:
-  serve                       aplica as migrações e sobe a API (HTTPS com mTLS)
+  serve                       aplica as migrações e sobe a API e o painel web
+                              (HTTPS); numa instalação vazia, mostra no log o
+                              código da primeira configuração (/setup)
   serve --behind-proxy --trusted-proxies <CIDRs>
                               sobe a API em HTTP puro, atrás de um proxy
                               reverso que termina o TLS (Nginx, Caddy…)
-  tenant create <nome>        cria um tenant
+  tenant create [--admin-email <e-mail> --admin-name <nome>] <nome>
+                              cria um tenant; com --admin-email, também o
+                              primeiro administrador do painel
+  user set-password --email <e-mail>
+                              troca a senha de login do painel (recuperação de
+                              acesso) e encerra as sessões abertas
   tenant export --tenant <n> --out <arquivo> [--with-ca-key]
                               exporta o tenant inteiro num pacote .tar.gz
   tenant verify <arquivo>     confere um pacote exportado, sem banco
@@ -118,6 +127,8 @@ func main() {
 		err = runUnitList(ctx, os.Args[3:])
 	case cmd == "actor create":
 		err = runActorCreate(ctx, os.Args[3:])
+	case cmd == "user set-password":
+		err = runUserSetPassword(ctx, os.Args[3:])
 	case os.Args[1] == "version" || os.Args[1] == "--version":
 		fmt.Println(version)
 	case os.Args[1] == "help" || os.Args[1] == "-h" || os.Args[1] == "--help":
@@ -172,6 +183,7 @@ func runServe(ctx context.Context, args []string) error {
 	trustedProxies := fs.String("trusted-proxies", "", "com --behind-proxy: IPs ou CIDRs de onde o proxy conecta, separados por vírgula; só deles se leem os X-Forwarded-*")
 	minConf := fs.Float64("auto-map-confidence", normalize.DefaultMinConfidence,
 		"confiança mínima para uma regra mapear software sem revisão (0 a 1)")
+	stale := fs.Duration("stale", 12*time.Hour, "no painel, sem notícia do agente por mais que isto = atrasado")
 	fs.Parse(args)
 	if *minConf <= 0 || *minConf > 1 {
 		return errors.New("--auto-map-confidence precisa estar entre 0 (exclusive) e 1")
@@ -273,8 +285,32 @@ func runServe(ctx context.Context, args []string) error {
 	// Antes de fechar o pool: a transação em curso termina ou é desfeita.
 	defer func() { stopIngest(); <-ingestDone }()
 
+	// A primeira configuração pelo painel exige um código, mostrado aqui uma
+	// vez (ou dado em INVENIRE_SETUP_CODE): quem achar primeiro uma
+	// instalação nova exposta na internet não toma posse dela.
+	var setupCode string
+	if n, err := store.New(pool).CountTenants(ctx); err != nil {
+		return err
+	} else if n == 0 {
+		setupCode = strings.TrimSpace(os.Getenv(setupCodeEnv))
+		if setupCode == "" {
+			setupCode = web.NewSetupCode()
+		}
+		log.Warn("primeira configuração: abra o painel no navegador (/setup) e use este código", "codigo", setupCode)
+	}
+	panel, err := web.New(web.Config{API: srv, Log: log, SetupCode: setupCode, Stale: *stale})
+	if err != nil {
+		return err
+	}
+	// Mesma porta: a API em /v1/ e /healthz, o painel no resto.
+	root := http.NewServeMux()
+	apiHandler := srv.Handler()
+	root.Handle("/v1/", apiHandler)
+	root.Handle("/healthz", apiHandler)
+	root.Handle("/", panel.Handler())
+
 	var tlsCfg *tls.Config
-	handler := srv.Handler()
+	handler := http.Handler(root)
 	if *behindProxy {
 		handler = api.ProxyHeaders(trusted, handler)
 	} else {
@@ -318,6 +354,9 @@ func runServe(ctx context.Context, args []string) error {
 	}
 	return nil
 }
+
+// setupCodeEnv dá o código da primeira configuração, em vez de um gerado.
+const setupCodeEnv = "INVENIRE_SETUP_CODE"
 
 // caPin é o SHA-256 do certificado da CA. Vai junto com o token de cadastro
 // para o agente conferir o servidor antes de confiar nele.
@@ -459,9 +498,31 @@ func runTenantVerify(args []string) error {
 	return nil
 }
 
+// passwordEnv traz a senha para tenant create --admin-email e user
+// set-password sem que ela fique no histórico do terminal; sem ela, o
+// comando gera uma e a mostra.
+const passwordEnv = "INVENIRE_PASSWORD"
+
+// newPassword é a senha de INVENIRE_PASSWORD ou uma gerada agora.
+func newPassword() (pw string, generated bool) {
+	if pw = os.Getenv(passwordEnv); pw != "" {
+		return pw, false
+	}
+	b := make([]byte, 15)
+	rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b), true
+}
+
 func runTenantCreate(ctx context.Context, args []string) error {
-	if len(args) != 1 || args[0] == "" {
-		return errors.New("uso: invenire-server tenant create <nome>")
+	fs := flag.NewFlagSet("tenant create", flag.ExitOnError)
+	email := fs.String("admin-email", "", "e-mail do primeiro administrador do painel (a senha vem de "+passwordEnv+" ou é gerada)")
+	adminName := fs.String("admin-name", "", "nome do primeiro administrador (com --admin-email)")
+	fs.Parse(args)
+	if fs.NArg() != 1 || fs.Arg(0) == "" {
+		return errors.New("uso: invenire-server tenant create [--admin-email <e-mail> --admin-name <nome>] <nome>")
+	}
+	if (*email == "") != (*adminName == "") {
+		return errors.New("--admin-email e --admin-name vão juntos")
 	}
 	if err := migrate(ctx); err != nil {
 		return fmt.Errorf("migrações: %w", err)
@@ -471,11 +532,54 @@ func runTenantCreate(ctx context.Context, args []string) error {
 		return err
 	}
 	defer pool.Close()
-	t, err := store.New(pool).CreateTenant(ctx, args[0])
+	if *email == "" {
+		t, err := store.New(pool).CreateTenant(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		fmt.Println(t.ID)
+		return nil
+	}
+	// A mesma função do /setup do painel.
+	pw, generated := newPassword()
+	org, err := api.CreateOrganization(ctx, pool, api.OrgSpec{
+		Name: fs.Arg(0), AdminName: *adminName, AdminEmail: *email, AdminPassword: pw, LinkExistingLogin: true,
+	})
 	if err != nil {
 		return err
 	}
-	fmt.Println(t.ID)
+	fmt.Printf("tenant:  %s\nadmin:   %s (%s)\n", org.Tenant.ID, org.Admin.ID, strings.ToLower(strings.TrimSpace(*email)))
+	switch {
+	case org.LinkedLogin:
+		fmt.Println("senha:   a que o e-mail já tinha nesta instalação")
+	case generated:
+		fmt.Printf("senha:   %s\n", pw)
+		fmt.Fprintln(os.Stderr, "a senha acima só aparece agora; a pessoa pode trocá-la no painel, em Minha conta")
+	}
+	return nil
+}
+
+func runUserSetPassword(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("user set-password", flag.ExitOnError)
+	email := fs.String("email", "", "e-mail de login no painel (obrigatório)")
+	fs.Parse(args)
+	if *email == "" || fs.NArg() != 0 {
+		return errors.New("uso: invenire-server user set-password --email <e-mail>   (a senha vem de " + passwordEnv + " ou é gerada)")
+	}
+	pool, err := connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	pw, generated := newPassword()
+	if err := api.SetPassword(ctx, pool, *email, pw, nil); err != nil {
+		return err
+	}
+	if generated {
+		fmt.Printf("senha:   %s\n", pw)
+		fmt.Fprintln(os.Stderr, "a senha acima só aparece agora; a pessoa pode trocá-la no painel, em Minha conta")
+	}
+	fmt.Fprintln(os.Stderr, "senha trocada; as sessões abertas no painel foram encerradas")
 	return nil
 }
 
@@ -513,7 +617,7 @@ func runTokenCreate(ctx context.Context, args []string) error {
 		}
 		unitID = &u.ID
 	}
-	tok, err := api.CreateEnrollmentToken(ctx, q, api.TokenSpec{Tenant: t.ID, Unit: unitID, Description: *desc, TTL: *ttl, Uses: *uses})
+	tok, err := api.IssueEnrollmentToken(ctx, q, nil, api.TokenSpec{Tenant: t.ID, Unit: unitID, Description: *desc, TTL: *ttl, Uses: *uses})
 	if err != nil {
 		return err
 	}
@@ -728,10 +832,7 @@ func runTokenRevoke(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("tenant %q: %w", *tenant, err)
 	}
-	r, err := q.RevokeEnrollmentToken(ctx, store.RevokeEnrollmentTokenParams{ID: id, TenantID: t.ID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return errors.New("token não encontrado neste tenant, ou já revogado")
-	}
+	r, err := api.RevokeEnrollmentToken(ctx, q, t.ID, nil, id)
 	if err != nil {
 		return err
 	}

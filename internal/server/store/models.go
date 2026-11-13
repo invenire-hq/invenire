@@ -19,6 +19,7 @@ type Actor struct {
 	Scopes     []string
 	CreatedAt  time.Time
 	DisabledAt *time.Time
+	LoginID    *uuid.UUID
 }
 
 type Agent struct {
@@ -112,6 +113,23 @@ type Installation struct {
 	LastSnapshotID    uuid.UUID
 	RemovedAt         *time.Time
 	RemovedSnapshotID *uuid.UUID
+}
+
+type Login struct {
+	ID                uuid.UUID
+	Email             string
+	PasswordHash      string
+	CreatedAt         time.Time
+	PasswordChangedAt time.Time
+}
+
+type LoginSession struct {
+	IDHash     []byte
+	LoginID    uuid.UUID
+	ActorID    uuid.UUID
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+	ExpiresAt  time.Time
 }
 
 type OrgUnit struct {

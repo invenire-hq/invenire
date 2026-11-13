@@ -1,0 +1,42 @@
+{{define "content"}}
+{{$d := .Data}}{{$sw := $d.List.Software}}
+<p class="crumbs"><a href="/software">{{t "nav.software"}}</a> ›</p>
+<h1>{{$sw.Product}}</h1>
+<p>{{t "col.vendor"}}: {{orDash (deref $sw.Vendor)}}{{if eq $sw.Scope "tenant"}} <span class="badge">{{t "software.scope_tenant"}}</span>{{end}}</p>
+
+<form method="get" action="/software/{{$sw.ID}}" class="filters">
+  <label>{{t "col.version"}}
+    <select name="version_id">
+      <option value="">{{t "filter.all"}}</option>
+      {{range $d.List.Versions}}<option value="{{.ID}}" {{if eq .ID.String $d.Version}}selected{{end}}>{{.Version}} ({{.AssetCount}})</option>{{end}}
+    </select>
+  </label>
+  <label>{{t "col.unit"}}
+    <select name="unit">
+      <option value="">{{t "filter.all"}}</option>
+      {{range $d.Units}}<option value="{{.ID}}" {{if eq .ID.String $d.Unit}}selected{{end}}>{{.Path}}</option>{{end}}
+    </select>
+  </label>
+  <button>{{t "action.filter"}}</button>
+</form>
+
+{{if $d.List.Items}}
+<table class="list">
+  <thead><tr><th>{{t "col.hostname"}}</th><th>{{t "col.unit"}}</th><th>{{t "col.version"}}</th><th>{{t "asset.since"}}</th><th>{{t "asset.path"}}</th></tr></thead>
+  <tbody>
+  {{range $d.List.Items}}
+  <tr>
+    <td><a href="/assets/{{.AssetID}}">{{orDash (deref .Collected.Hostname)}}</a></td>
+    <td>{{with .Unit}}{{.Path}}{{else}}–{{end}}</td>
+    <td>{{.Collected.Version}}</td>
+    <td>{{when .InstalledSince}}</td>
+    <td class="path">{{.Collected.InstallPath}}</td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+{{with $d.Next}}<p class="pager"><a href="{{.}}">{{t "action.next_page"}}</a></p>{{end}}
+{{else}}
+<p class="hint">{{t "software.no_installations"}}</p>
+{{end}}
+{{end}}

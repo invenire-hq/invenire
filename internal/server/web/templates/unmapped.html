@@ -1,0 +1,83 @@
+{{define "content"}}
+{{$d := .Data}}
+<p class="crumbs"><a href="/software">{{t "nav.software"}}</a> ›</p>
+<h1>{{t "software.unmapped"}}</h1>
+<p class="hint">{{t "software.unmapped_intro"}}</p>
+<form method="get" action="/software/unmapped" class="filters">
+  <label>{{t "software.source"}}
+    <select name="source">
+      <option value="">{{t "filter.all"}}</option>
+      {{range $s := (list "win_registry" "dpkg" "rpm")}}<option value="{{$s}}" {{if eq $s $d.Source}}selected{{end}}>{{label "source." $s}}</option>{{end}}
+    </select>
+  </label>
+  <button>{{t "action.filter"}}</button>
+</form>
+
+{{if $d.List.Items}}
+<table class="list">
+  <thead><tr>
+    <th>{{t "software.raw_name"}}</th><th>{{t "col.vendor"}}</th><th>{{t "software.source"}}</th><th class="num">{{t "software.machines"}}</th>
+    <th>{{if .S.Admin}}{{t "software.map"}}{{else}}{{t "software.suggestion"}}{{end}}</th>
+  </tr></thead>
+  <tbody>
+  {{range $d.List.Items}}
+  <tr>
+    <td>{{.Collected.Name}}</td>
+    <td>{{orDash .Collected.Vendor}}</td>
+    <td>{{label "source." .Source}}</td>
+    <td class="num">{{.AssetCount}}</td>
+    <td>
+      {{if $.S.Admin}}
+      <form method="post" action="/software/raw/{{.ID}}/map" class="row compact">
+        {{template "csrf" $}}
+        <input type="hidden" name="volta" value="{{$.Data.Back}}">
+        <input name="vendor" value="{{with .Suggestion}}{{.Vendor}}{{end}}" placeholder="{{t "col.vendor"}}" aria-label="{{t "col.vendor"}}" maxlength="200">
+        <input name="product" value="{{with .Suggestion}}{{.Product}}{{end}}" placeholder="{{t "col.product"}}" aria-label="{{t "col.product"}}" required maxlength="200">
+        <button class="small">{{t "software.map"}}</button>
+      </form>
+      {{with .Suggestion}}<small class="hint">{{t "software.suggested" (printf "%.0f" (mul100 .Confidence))}}</small>{{end}}
+      {{else}}
+      {{with .Suggestion}}{{.Vendor}} {{.Product}} <small class="hint">({{printf "%.0f" (mul100 .Confidence)}}%)</small>{{else}}–{{end}}
+      {{end}}
+    </td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="hint">{{t "software.none_unmapped"}}</p>
+{{end}}
+<p class="pager">
+  {{if $d.Paged}}<a href="/software/unmapped?source={{$d.Source}}">{{t "action.first_page"}}</a>{{end}}
+  {{with $d.Next}}<a href="{{.}}">{{t "action.next_page"}}</a>{{end}}
+</p>
+
+<section class="card">
+  <h2>{{t "software.manual"}}</h2>
+  <p class="hint">{{t "software.manual_intro"}}</p>
+  {{if $d.Mappings}}
+  <table class="list">
+    <thead><tr><th>{{t "software.raw_name"}}</th><th>{{t "software.source"}}</th><th>{{t "software.mapped_to"}}</th><th>{{t "col.when"}}</th><th></th></tr></thead>
+    <tbody>
+    {{range $d.Mappings}}
+    <tr>
+      <td>{{.RawName}}{{with .RawVendor}} <small class="hint">({{.}})</small>{{end}}</td>
+      <td>{{label "source." .Source}}</td>
+      <td><a href="/software/{{.SoftwareID}}">{{with .Vendor}}{{.}} {{end}}{{.Product}}</a></td>
+      <td>{{when .MappedAt}}</td>
+      <td>
+        {{if $.S.Admin}}
+        <form method="post" action="/software/raw/{{.SoftwareRawID}}/unmap" data-confirm="{{t "software.unmap_confirm"}}">
+          {{template "csrf" $}}<button class="link small">{{t "software.unmap"}}</button>
+        </form>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="hint">{{t "software.no_manual"}}</p>
+  {{end}}
+</section>
+{{end}}

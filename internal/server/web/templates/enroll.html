@@ -1,0 +1,124 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>{{t "nav.enroll"}}</h1>
+
+{{if $d.First}}
+<section class="card welcome">
+  <h2>{{t "enroll.welcome_title"}}</h2>
+  <p>{{t "enroll.welcome"}}</p>
+  {{if .S.Admin}}
+  <form method="post" action="/units" class="row">
+    {{template "csrf" .}}
+    <input type="hidden" name="volta" value="/enroll?primeira=1">
+    <label>{{t "units.first"}} <input name="name" maxlength="120" required placeholder="{{t "units.name_example"}}"></label>
+    <button>{{t "units.create"}}</button>
+  </form>
+  {{end}}
+</section>
+{{end}}
+
+{{with $d.New}}
+<section class="card secret" aria-live="polite">
+  <h2>{{t "enroll.new_title"}}</h2>
+  <p class="warn">{{t "enroll.once"}}</p>
+  <div class="copyrow"><code class="token" id="novo-token">{{.Token}}</code> <button type="button" data-copy="novo-token">{{t "action.copy"}}</button></div>
+  <dl class="pairs">
+    <dt>{{t "enroll.machines"}}</dt><dd>{{.Uses}}</dd>
+    <dt>{{t "enroll.expires"}}</dt><dd>{{when .ExpiresAt}}</dd>
+    <dt>{{t "col.unit"}}</dt><dd>{{orDash .Unit}}</dd>
+    <dt>{{t "enroll.server"}}</dt><dd><code>{{.Server}}</code></dd>
+    <dt>{{t "enroll.pin"}}</dt><dd>{{if .Pin}}<code>{{.Pin}}</code>{{else}}{{t "enroll.no_pin"}}{{end}}</dd>
+  </dl>
+  {{if gt .Uses 1}}<p class="hint">{{t "enroll.many_uses"}}</p>{{end}}
+
+  <h3>{{t "enroll.how"}}</h3>
+  <p>{{t "enroll.how_intro"}}</p>
+
+  <h4>{{t "enroll.windows"}}</h4>
+  <p class="hint">{{t "enroll.windows_hint"}}</p>
+  <pre id="cmd-win">$env:INVENIRE_ENROLL_TOKEN = "{{.Token}}"
+.\instalar.ps1 -Server {{.Server}}{{if .Pin}} -CaPin {{.Pin}}{{end}}</pre>
+  <button type="button" data-copy="cmd-win">{{t "action.copy"}}</button>
+
+  <h4>{{t "enroll.linux"}}</h4>
+  <p class="hint">{{t "enroll.linux_hint"}}</p>
+  <pre id="cmd-linux">sudo INVENIRE_ENROLL_TOKEN={{.Token}} ./instalar.sh --server {{.Server}}{{if .Pin}} --ca-pin {{.Pin}}{{end}}</pre>
+  <button type="button" data-copy="cmd-linux">{{t "action.copy"}}</button>
+
+  <details>
+    <summary>{{t "enroll.manual"}}</summary>
+    <p class="hint">{{t "enroll.manual_hint"}}</p>
+    <pre id="cmd-manual">invenire-agent enroll --server {{.Server}}{{if .Pin}} --ca-pin {{.Pin}}{{end}} --token {{.Token}}
+invenire-agent service install</pre>
+    <button type="button" data-copy="cmd-manual">{{t "action.copy"}}</button>
+  </details>
+  <p class="hint">{{t "enroll.after"}}</p>
+</section>
+{{end}}
+
+{{if .S.Admin}}
+<section class="card">
+  <h2>{{t "enroll.create_title"}}</h2>
+  <form method="post" action="/enroll" class="grid-form">
+    {{template "csrf" .}}
+    <label>{{t "col.unit"}}
+      <select name="unit">
+        <option value="">{{t "enroll.no_unit"}}</option>
+        {{range $d.Units}}<option value="{{.ID}}">{{.Path}}</option>{{end}}
+      </select>
+      <small>{{t "enroll.unit_hint"}}</small>
+    </label>
+    <label>{{t "enroll.machines"}}
+      <input type="number" name="uses" value="1" min="1" max="10000" required>
+      <small>{{t "enroll.uses_hint"}}</small>
+    </label>
+    <label>{{t "enroll.validity"}}
+      <select name="ttl">
+        <option value="1h">{{t "ttl.1h"}}</option>
+        <option value="24h" selected>{{t "ttl.24h"}}</option>
+        <option value="168h">{{t "ttl.7d"}}</option>
+        <option value="720h">{{t "ttl.30d"}}</option>
+      </select>
+    </label>
+    <label>{{t "field.description"}}
+      <input name="description" maxlength="200" placeholder="{{t "enroll.description_example"}}">
+    </label>
+    <div><button class="primary">{{t "enroll.create"}}</button></div>
+  </form>
+</section>
+{{end}}
+
+<section>
+  <h2>{{t "enroll.tokens"}}</h2>
+  <p>{{if $d.All}}<a href="/enroll">{{t "enroll.only_valid"}}</a>{{else}}<a href="/enroll?todos=1">{{t "enroll.show_all"}}</a>{{end}}</p>
+  {{if $d.Tokens}}
+  <table class="list">
+    <thead><tr>
+      <th>{{t "col.created"}}</th><th>{{t "field.description"}}</th><th>{{t "col.unit"}}</th>
+      <th class="num">{{t "enroll.used"}}</th><th>{{t "enroll.expires"}}</th><th>{{t "col.state"}}</th><th></th>
+    </tr></thead>
+    <tbody>
+    {{range $d.Tokens}}
+    <tr>
+      <td>{{when .CreatedAt}}</td>
+      <td>{{orDash .Description}}</td>
+      <td>{{orDash .Unit}}</td>
+      <td class="num">{{.Uses}}/{{.MaxUses}}</td>
+      <td>{{when .ExpiresAt}}</td>
+      <td>{{t (print "token." .State)}}</td>
+      <td>
+        {{if and $.S.Admin (eq .State "valid")}}
+        <form method="post" action="/enroll/{{.ID}}/revoke" data-confirm="{{t "enroll.revoke_confirm"}}">
+          {{template "csrf" $}}<button class="danger small">{{t "action.revoke"}}</button>
+        </form>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="hint">{{t "enroll.none"}}</p>
+  {{end}}
+</section>
+{{end}}

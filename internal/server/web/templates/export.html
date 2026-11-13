@@ -1,0 +1,26 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>{{t "nav.export"}}</h1>
+{{if $d.Key}}
+<section class="card secret" aria-live="polite">
+  <h2>{{t "export.key_title"}}</h2>
+  <p class="warn">{{t "export.key_once"}}</p>
+  <div class="copyrow"><code class="token" id="chave">{{$d.Key}}</code> <button type="button" data-copy="chave">{{t "action.copy"}}</button></div>
+  <p><a class="button primary" href="{{$d.Download}}" download>{{t "export.download"}}</a></p>
+  <p class="hint">{{t "export.link_once"}}</p>
+</section>
+{{else}}
+<p>{{t "export.intro"}}</p>
+<ul>
+  <li>{{t "export.what"}}</li>
+  <li>{{t "export.not"}}</li>
+  <li>{{t "export.verify"}}</li>
+</ul>
+<form method="post" action="/export" class="card stack">
+  {{template "csrf" .}}
+  <label class="check"><input type="checkbox" name="with_ca_key" value="1"> {{t "export.with_key"}}</label>
+  <p class="hint">{{t "export.with_key_hint"}}</p>
+  <div><button class="primary">{{t "export.start"}}</button></div>
+</form>
+{{end}}
+{{end}}

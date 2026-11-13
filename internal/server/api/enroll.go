@@ -37,6 +37,8 @@ type TokenSpec struct {
 	// Uses é quantas máquinas o token cadastra (1 a 10000). Mais de um
 	// serve a um lote, como o piloto; cada uso fica no change_log.
 	Uses int
+	// CreatedBy é o ator que criou o token (nulo = linha de comando).
+	CreatedBy *uuid.UUID
 }
 
 // NewToken é um token de cadastro recém-criado.
@@ -61,6 +63,7 @@ func CreateEnrollmentToken(ctx context.Context, q *store.Queries, spec TokenSpec
 		Description: spec.Description,
 		ExpiresAt:   time.Now().Add(spec.TTL),
 		UnitID:      spec.Unit,
+		CreatedBy:   spec.CreatedBy,
 		MaxUses:     int32(spec.Uses),
 	})
 	return NewToken{ID: row.ID, Token: token, ExpiresAt: row.ExpiresAt}, err

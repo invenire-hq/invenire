@@ -1,0 +1,52 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>{{t "nav.assets"}}</h1>
+<form method="get" action="/assets" class="filters">
+  <label>{{t "col.hostname"}} <input name="host" value="{{$d.Filter.Host}}" placeholder="{{t "assets.host_hint"}}"></label>
+  <label>{{t "col.unit"}}
+    <select name="unit">
+      <option value="">{{t "filter.all"}}</option>
+      <option value="none" {{if eq $d.Filter.Unit "none"}}selected{{end}}>{{t "assets.no_unit"}}</option>
+      {{range $d.Units}}<option value="{{.ID}}" {{if eq .ID.String $d.Filter.Unit}}selected{{end}}>{{.Path}}</option>{{end}}
+    </select>
+  </label>
+  <label>{{t "col.os"}}
+    <select name="os">
+      <option value="">{{t "filter.all"}}</option>
+      <option value="windows" {{if eq $d.Filter.OS "windows"}}selected{{end}}>Windows</option>
+      <option value="linux" {{if eq $d.Filter.OS "linux"}}selected{{end}}>Linux</option>
+    </select>
+  </label>
+  <button>{{t "action.filter"}}</button>
+  <a href="/assets">{{t "action.clear"}}</a>
+</form>
+
+{{if $d.List.Items}}
+<table class="list">
+  <thead><tr>
+    <th>{{t "col.state"}}</th><th>{{t "col.hostname"}}</th><th>{{t "col.os"}}</th><th>{{t "col.model"}}</th>
+    <th>{{t "col.unit"}}</th><th>{{t "col.labels"}}</th><th class="num">{{t "col.programs"}}</th><th>{{t "col.seen"}}</th>
+  </tr></thead>
+  <tbody>
+  {{range $d.List.Items}}
+  <tr>
+    <td>{{with index $d.State .ID}}{{template "state" .}}{{end}}</td>
+    <td><a href="/assets/{{.ID}}">{{orDash (deref .Collected.Hostname)}}</a></td>
+    <td>{{orDash (deref .Collected.OSName)}}</td>
+    <td>{{deref .Collected.Manufacturer}} {{deref .Collected.Model}}</td>
+    <td>{{with .Unit}}{{.Path}}{{else}}–{{end}}</td>
+    <td>{{range $k, $v := .Labels}}<span class="label">{{$k}}={{$v}}</span> {{end}}</td>
+    <td class="num">{{.InstalledCount}}</td>
+    <td>{{with .Agent}}<span title="{{when .LastSeenAt}}">{{ago .LastSeenAt}}</span>{{else}}{{t "assets.no_agent"}}{{end}}</td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="hint">{{t "assets.none"}}</p>
+{{end}}
+<p class="pager">
+  {{if $d.Paged}}<a href="/assets?unit={{$d.Filter.Unit}}&amp;os={{$d.Filter.OS}}&amp;host={{$d.Filter.Host}}">{{t "action.first_page"}}</a>{{end}}
+  {{with $d.Next}}<a href="{{.}}">{{t "action.next_page"}}</a>{{end}}
+</p>
+{{end}}

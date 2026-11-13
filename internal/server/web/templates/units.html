@@ -1,0 +1,41 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>{{t "nav.units"}}</h1>
+<p class="hint">{{t "units.intro"}}</p>
+{{if $d.Units}}
+<table class="list tree">
+  <thead><tr><th>{{t "field.name"}}</th><th>{{t "units.kind"}}</th><th class="num">{{t "units.assets"}}</th></tr></thead>
+  <tbody>
+  {{range $d.Units}}
+  <tr>
+    <td class="depth-{{depth .Path}}"><a href="/units/{{.ID}}">{{.Name}}</a></td>
+    <td>{{orDash .Kind}}</td>
+    <td class="num"><a href="/assets?unit={{.ID}}">{{.AssetCount}}</a></td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="hint">{{t "units.none"}}</p>
+{{end}}
+
+{{if .S.Admin}}
+<section class="card">
+  <h2>{{t "units.new"}}</h2>
+  <form method="post" action="/units" class="grid-form">
+    {{template "csrf" .}}
+    <label>{{t "field.name"}} <input name="name" maxlength="120" required placeholder="{{t "units.name_example"}}"></label>
+    <label>{{t "units.parent"}}
+      <select name="parent">
+        <option value="">{{t "units.root"}}</option>
+        {{range $d.Units}}<option value="{{.ID}}">{{.Path}}</option>{{end}}
+      </select>
+    </label>
+    <label>{{t "units.kind"}} <input name="kind" maxlength="60" placeholder="{{t "units.kind_example"}}">
+      <small>{{t "units.kind_hint"}}</small>
+    </label>
+    <div><button class="primary">{{t "units.create"}}</button></div>
+  </form>
+</section>
+{{end}}
+{{end}}

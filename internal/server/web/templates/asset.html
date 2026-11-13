@@ -1,0 +1,135 @@
+{{define "content"}}
+{{$d := .Data}}{{$a := $d.A}}
+<p class="crumbs"><a href="/assets">{{t "nav.assets"}}</a> ›</p>
+<h1>{{orDash (deref $a.Collected.Hostname)}} {{with $d.Status.State}}{{template "state" .}}{{end}}</h1>
+{{with $d.Status.State}}<p class="todo">{{t (print "state." . ".todo")}}</p>{{end}}
+
+<div class="grid2">
+  <section class="card">
+    <h2>{{t "asset.machine"}}</h2>
+    <dl class="pairs">
+      <dt>{{t "col.os"}}</dt><dd>{{orDash (deref $a.Collected.OSName)}} {{deref $a.Collected.OSVersion}}</dd>
+      <dt>{{t "col.model"}}</dt><dd>{{orDash (print (deref $a.Collected.Manufacturer) " " (deref $a.Collected.Model))}}</dd>
+      <dt>{{t "asset.serial"}}</dt><dd>{{orDash (deref $a.Collected.Serial)}}</dd>
+      <dt>{{t "asset.first_seen"}}</dt><dd>{{when $a.FirstSeenAt}}</dd>
+      <dt>{{t "col.programs"}}</dt><dd>{{$a.InstalledCount}}</dd>
+      <dt>{{t "col.collected"}}</dt><dd>{{with $d.Status.LastCollected}}{{when .}} ({{ago .}}){{else}}{{t "time.never"}}{{end}}</dd>
+    </dl>
+  </section>
+  <section class="card">
+    <h2>{{t "asset.agent"}}</h2>
+    {{with $a.Agent}}
+    <dl class="pairs">
+      <dt>{{t "asset.version"}}</dt><dd>{{.Version}}</dd>
+      <dt>{{t "asset.enrolled"}}</dt><dd>{{when .EnrolledAt}}</dd>
+      <dt>{{t "col.seen"}}</dt><dd>{{with .LastSeenAt}}{{when .}} ({{ago .}}){{else}}{{t "time.never"}}{{end}}</dd>
+    </dl>
+    {{if $.S.Admin}}
+    <form method="post" action="/assets/{{$a.ID}}/revoke" data-confirm="{{t "asset.revoke_confirm"}}">
+      {{template "csrf" $}}<button class="danger">{{t "asset.revoke"}}</button>
+    </form>
+    <p class="hint">{{t "asset.revoke_hint"}}</p>
+    {{end}}
+    {{else}}
+    <p>{{t "asset.no_agent"}}</p>
+    {{end}}
+  </section>
+</div>
+
+<section class="card">
+  <h2>{{t "asset.organization"}}</h2>
+  {{if .S.Admin}}
+  <form method="post" action="/assets/{{$a.ID}}/unit" class="row">
+    {{template "csrf" .}}
+    <label>{{t "col.unit"}}
+      <select name="unit">
+        <option value="">{{t "assets.no_unit"}}</option>
+        {{range $d.Units}}<option value="{{.ID}}" {{if $a.Unit}}{{if eq .ID.String $a.Unit.ID.String}}selected{{end}}{{end}}>{{.Path}}</option>{{end}}
+      </select>
+    </label>
+    <button>{{t "action.save"}}</button>
+  </form>
+  {{else}}
+  <p>{{t "col.unit"}}: {{with $a.Unit}}{{.Path}}{{else}}{{t "assets.no_unit"}}{{end}}</p>
+  {{end}}
+
+  <h3>{{t "col.labels"}}</h3>
+  {{if $a.Labels}}
+  <ul class="labels">
+    {{range $k, $v := $a.Labels}}
+    <li><span class="label">{{$k}}={{$v}}</span>
+      {{if $.S.Admin}}
+      <form method="post" action="/assets/{{$a.ID}}/labels/remove" class="inline">
+        {{template "csrf" $}}<input type="hidden" name="key" value="{{$k}}">
+        <button class="link small" aria-label="{{t "action.remove"}} {{$k}}">{{t "action.remove"}}</button>
+      </form>
+      {{end}}
+    </li>
+    {{end}}
+  </ul>
+  {{else}}<p class="hint">{{t "asset.no_labels"}}</p>{{end}}
+  {{if .S.Admin}}
+  <form method="post" action="/assets/{{$a.ID}}/labels" class="row">
+    {{template "csrf" .}}
+    <label>{{t "asset.label_key"}} <input name="key" required pattern="[a-z0-9][a-z0-9_.\-]{0,62}" placeholder="ambiente" maxlength="63"></label>
+    <label>{{t "asset.label_value"}} <input name="value" maxlength="256" placeholder="produção"></label>
+    <button>{{t "action.save"}}</button>
+  </form>
+  <p class="hint">{{t "asset.label_hint"}}</p>
+  {{end}}
+</section>
+
+<section class="card" id="software">
+  <h2>{{t "asset.software"}}</h2>
+  <form method="get" action="/assets/{{$a.ID}}" class="filters">
+    <input type="hidden" name="kinds" value="{{$d.Kinds}}">
+    <label>{{t "col.product"}} <input name="product" value="{{$d.Product}}"></label>
+    <button>{{t "action.filter"}}</button>
+  </form>
+  {{if $d.Software.Items}}
+  <table class="list">
+    <thead><tr><th>{{t "col.product"}}</th><th>{{t "col.vendor"}}</th><th>{{t "col.version"}}</th><th>{{t "asset.since"}}</th><th>{{t "asset.path"}}</th></tr></thead>
+    <tbody>
+    {{range $d.Software.Items}}
+    <tr>
+      <td><a href="/software/{{.Software.ID}}">{{.Software.Product}}</a></td>
+      <td>{{orDash (deref .Software.Vendor)}}</td>
+      <td>{{.Collected.Version}}</td>
+      <td>{{when .InstalledSince}}</td>
+      <td class="path">{{.Collected.InstallPath}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{with $d.SwNext}}<p class="pager"><a href="{{.}}">{{t "action.next_page"}}</a></p>{{end}}
+  {{else}}<p class="hint">{{t "asset.no_software"}}</p>{{end}}
+</section>
+
+<section class="card" id="historico">
+  <h2>{{t "asset.history"}}</h2>
+  <form method="get" action="/assets/{{$a.ID}}#historico" class="filters">
+    <input type="hidden" name="product" value="{{$d.Product}}">
+    <label>{{t "asset.history_kind"}}
+      <select name="kinds">
+        <option value="">{{t "filter.all"}}</option>
+        <option value="software" {{if eq $d.Kinds "software"}}selected{{end}}>{{t "history.software"}}</option>
+        <option value="org" {{if eq $d.Kinds "org"}}selected{{end}}>{{t "history.org"}}</option>
+        <option value="agent" {{if eq $d.Kinds "agent"}}selected{{end}}>{{t "history.agent"}}</option>
+      </select>
+    </label>
+    <button>{{t "action.filter"}}</button>
+  </form>
+  {{if $d.History}}
+  <ol class="history">
+    {{range $d.History}}
+    <li>
+      <time datetime="{{.OccurredAt.Format "2006-01-02T15:04:05Z07:00"}}">{{when .OccurredAt}}</time>
+      <strong>{{event .Kind}}</strong>
+      {{range summary .Data}}<span class="kv"><span>{{.K}}</span> {{.V}}</span> {{end}}
+    </li>
+    {{end}}
+  </ol>
+  {{with $d.HistNext}}<p class="pager"><a href="{{.}}">{{t "action.older"}}</a></p>{{end}}
+  {{else}}<p class="hint">{{t "asset.no_history"}}</p>{{end}}
+</section>
+{{end}}

@@ -1,0 +1,75 @@
+{{define "head"}}<meta http-equiv="refresh" content="60">{{end}}
+{{define "content"}}
+<h1>{{t "nav.overview"}}</h1>
+{{$d := .Data}}
+{{if not $d.P.Assets}}
+<section class="card">
+  <h2>{{t "overview.empty_title"}}</h2>
+  <p>{{t "overview.empty"}}</p>
+  <p><a class="button primary" href="/enroll">{{t "nav.enroll"}}</a></p>
+</section>
+{{else}}
+<ul class="tiles">
+  {{range $d.States}}
+  <li class="tile st-{{.State}}{{if not .N}} zero{{end}}">
+    <strong>{{.N}}</strong> {{t (print "state." .State ".label")}}
+  </li>
+  {{end}}
+</ul>
+<p class="hint">
+  {{if $d.Problems}}{{t "overview.problems" $d.Problems}}{{else}}{{t "overview.all_ok"}}{{end}}
+  · {{t "overview.refresh"}}
+</p>
+
+<table class="list">
+  <thead><tr>
+    <th>{{t "col.state"}}</th><th>{{t "col.hostname"}}</th><th>{{t "col.os"}}</th><th>{{t "col.agent"}}</th>
+    <th>{{t "col.seen"}}</th><th>{{t "col.collected"}}</th><th class="num">{{t "col.programs"}}</th>
+    <th>{{t "col.unit"}}</th><th>{{t "col.todo"}}</th>
+  </tr></thead>
+  <tbody>
+  {{range $d.P.Assets}}
+  <tr>
+    <td>{{template "state" .State}}</td>
+    <td><a href="/assets/{{.ID}}">{{orDash .Hostname}}</a></td>
+    <td>{{orDash .OSFamily}}</td>
+    <td>{{orDash .AgentVersion}}</td>
+    <td title="{{when .AgentLastSeen}}">{{ago .AgentLastSeen}}</td>
+    <td title="{{when .LastCollected}}">{{ago .LastCollected}}</td>
+    <td class="num">{{.Installed}}</td>
+    <td>{{orDash .Unit}}</td>
+    <td class="todo">
+      {{t (print "state." .State ".todo")}}
+      {{if .Pending}}<br><small>{{t "overview.pending" .Pending}}</small>{{end}}
+      {{if .Failed}}<br><small>{{t "overview.failed" .Failed}}</small>{{end}}
+      {{if .ChainBreaks}}<br><small>{{t "overview.chain" .ChainBreaks}}</small>{{end}}
+    </td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+
+<div class="grid2">
+  <section class="card">
+    <h2>{{t "overview.summary"}}</h2>
+    <dl class="pairs">
+      <dt>{{t "overview.systems"}}</dt><dd>{{range $i, $e := $d.OS}}{{if $i}}, {{end}}{{$e.K}} {{$e.V}}{{else}}–{{end}}</dd>
+      <dt>{{t "overview.versions"}}</dt><dd>{{range $i, $e := $d.Versions}}{{if $i}}, {{end}}{{$e.K}} {{$e.V}}{{else}}–{{end}}</dd>
+      <dt>{{t "overview.unmapped"}}</dt><dd><a href="/software/unmapped">{{$d.P.Unmapped}}</a></dd>
+      <dt>{{t "overview.tokens"}}</dt><dd><a href="/enroll">{{$d.P.ValidTokens}}</a></dd>
+    </dl>
+  </section>
+  {{if $d.P.Errors}}
+  <section class="card">
+    <h2>{{t "overview.errors"}}</h2>
+    <ul class="plain">
+    {{range $d.P.Errors}}
+      <li><a href="/assets/{{.AssetID}}">{{orDash (deref .Hostname)}}</a>, {{when .CollectedAt}}: <code>{{deref .IngestError}}</code></li>
+    {{end}}
+    </ul>
+    <p class="hint">{{t "overview.errors_hint"}}</p>
+  </section>
+  {{end}}
+</div>
+{{end}}
+{{end}}

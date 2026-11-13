@@ -205,59 +205,35 @@ func pathID(w http.ResponseWriter, r *http.Request, what string) (uuid.UUID, boo
 
 // listUnits: GET /v1/units, a árvore inteira em ordem de caminho.
 func (s *Server) listUnits(w http.ResponseWriter, r *http.Request) {
-	actor := actorFrom(r.Context())
-	tx, err := s.pool.BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	resp, err := s.ListUnits(r.Context(), actorFrom(r.Context()).TenantID)
 	if err != nil {
-		s.internalError(w, r, err)
+		s.fail(w, r, err)
 		return
-	}
-	defer tx.Rollback(r.Context())
-	q := s.q.WithTx(tx)
-	resp := UnitList{Items: []Unit{}}
-	if resp.AsOf, err = q.LatestChangeID(r.Context(), actor.TenantID); err != nil {
-		s.internalError(w, r, err)
-		return
-	}
-	rows, err := q.ListUnits(r.Context(), actor.TenantID)
-	if err != nil {
-		s.internalError(w, r, err)
-		return
-	}
-	for _, row := range rows {
-		resp.Items = append(resp.Items, unitFromRow(row))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// ListUnits é a árvore de unidades do tenant, em ordem de caminho.
+func (s *Server) ListUnits(ctx context.Context, tenant uuid.UUID) (UnitList, error) {
+	resp := UnitList{Items: []Unit{}}
+	var err error
+	resp.AsOf, err = s.readQuery(ctx, tenant, func(q *store.Queries) error {
+		rows, err := q.ListUnits(ctx, tenant)
+		for _, row := range rows {
+			resp.Items = append(resp.Items, unitFromRow(row))
+		}
+		return err
+	})
+	return resp, err
+}
+
 // createUnit: POST /v1/units.
 func (s *Server) createUnit(w http.ResponseWriter, r *http.Request) {
-	actor := actorFrom(r.Context())
 	var req UnitCreate
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	if req.ParentID != nil && req.ParentPath != "" {
-		writeError(w, http.StatusBadRequest, "use parent_id ou parent_path, não os dois")
-		return
-	}
-	var resp UnitResponse
-	err := s.inTx(r.Context(), func(q *store.Queries) error {
-		parent := req.ParentID
-		if req.ParentPath != "" {
-			p, err := ResolveUnitPath(r.Context(), q, actor.TenantID, req.ParentPath)
-			if err != nil {
-				return err
-			}
-			parent = &p.ID
-		}
-		u, asOf, err := CreateUnit(r.Context(), q, actor.TenantID, &actor.ID, parent, req.Kind, req.Name)
-		if err != nil {
-			return err
-		}
-		resp.AsOf = asOf
-		resp.Unit, err = unitView(r.Context(), q, actor.TenantID, u.ID)
-		return err
-	})
+	resp, err := s.AddUnit(r.Context(), actorFrom(r.Context()), req)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -265,10 +241,35 @@ func (s *Server) createUnit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+// AddUnit cria uma unidade no tenant do ator (POST /v1/units e o painel).
+func (s *Server) AddUnit(ctx context.Context, actor store.Actor, req UnitCreate) (UnitResponse, error) {
+	if req.ParentID != nil && req.ParentPath != "" {
+		return UnitResponse{}, errorf(http.StatusBadRequest, "use parent_id ou parent_path, não os dois")
+	}
+	var resp UnitResponse
+	err := s.inTx(ctx, func(q *store.Queries) error {
+		parent := req.ParentID
+		if req.ParentPath != "" {
+			p, err := ResolveUnitPath(ctx, q, actor.TenantID, req.ParentPath)
+			if err != nil {
+				return err
+			}
+			parent = &p.ID
+		}
+		u, asOf, err := CreateUnit(ctx, q, actor.TenantID, &actor.ID, parent, req.Kind, req.Name)
+		if err != nil {
+			return err
+		}
+		resp.AsOf = asOf
+		resp.Unit, err = unitView(ctx, q, actor.TenantID, u.ID)
+		return err
+	})
+	return resp, err
+}
+
 // updateUnit: PATCH /v1/units/{id}, renomeia, muda o tipo ou move a
 // unidade (com tudo o que está abaixo dela).
 func (s *Server) updateUnit(w http.ResponseWriter, r *http.Request) {
-	actor := actorFrom(r.Context())
 	id, ok := pathID(w, r, "unidade")
 	if !ok {
 		return
@@ -277,12 +278,23 @@ func (s *Server) updateUnit(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
+	resp, err := s.UpdateUnit(r.Context(), actorFrom(r.Context()), id, req)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// UpdateUnit renomeia, muda o tipo ou move a unidade (PATCH /v1/units/{id}
+// e o painel).
+func (s *Server) UpdateUnit(ctx context.Context, actor store.Actor, id uuid.UUID, req UnitUpdate) (UnitResponse, error) {
 	var resp UnitResponse
-	err := s.inTx(r.Context(), func(q *store.Queries) error {
-		if err := q.LockUnitTree(r.Context(), actor.TenantID); err != nil {
+	err := s.inTx(ctx, func(q *store.Queries) error {
+		if err := q.LockUnitTree(ctx, actor.TenantID); err != nil {
 			return err
 		}
-		u, err := q.GetUnitForUpdate(r.Context(), store.GetUnitForUpdateParams{ID: id, TenantID: actor.TenantID})
+		u, err := q.GetUnitForUpdate(ctx, store.GetUnitForUpdateParams{ID: id, TenantID: actor.TenantID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errorf(http.StatusNotFound, "unidade não encontrada")
 		}
@@ -315,7 +327,7 @@ func (s *Server) updateUnit(w http.ResponseWriter, r *http.Request) {
 			}
 			if !sameID(parent, u.ParentID) {
 				if parent != nil {
-					if err := s.checkNoCycle(r.Context(), q, actor.TenantID, id, *parent); err != nil {
+					if err := s.checkNoCycle(ctx, q, actor.TenantID, id, *parent); err != nil {
 						return err
 					}
 				}
@@ -327,29 +339,25 @@ func (s *Server) updateUnit(w http.ResponseWriter, r *http.Request) {
 			return errorf(http.StatusBadRequest, "nada a mudar")
 		}
 		if p.Name != u.Name || !sameID(p.ParentID, u.ParentID) {
-			if other, err := q.GetUnitByName(r.Context(), store.GetUnitByNameParams{TenantID: actor.TenantID, ParentID: p.ParentID, Name: p.Name}); err == nil && other.ID != id {
+			if other, err := q.GetUnitByName(ctx, store.GetUnitByNameParams{TenantID: actor.TenantID, ParentID: p.ParentID, Name: p.Name}); err == nil && other.ID != id {
 				return errorf(http.StatusConflict, "já existe a unidade %q nesse nível", p.Name)
 			} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return err
 			}
 		}
-		if _, err := q.UpdateUnit(r.Context(), p); err != nil {
+		if _, err := q.UpdateUnit(ctx, p); err != nil {
 			return err
 		}
 		data, _ := json.Marshal(change)
-		if resp.AsOf, err = q.AppendChange(r.Context(), store.AppendChangeParams{
+		if resp.AsOf, err = q.AppendChange(ctx, store.AppendChangeParams{
 			TenantID: actor.TenantID, Kind: "unit_updated", ActorID: &actor.ID, Data: data,
 		}); err != nil {
 			return err
 		}
-		resp.Unit, err = unitView(r.Context(), q, actor.TenantID, id)
+		resp.Unit, err = unitView(ctx, q, actor.TenantID, id)
 		return err
 	})
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp, err
 }
 
 // checkNoCycle confere que a nova mãe existe no tenant e não está abaixo da
@@ -382,26 +390,35 @@ func sameID(a, b *uuid.UUID) bool {
 // deleteUnit: DELETE /v1/units/{id}, só de unidade vazia: sem subunidades,
 // sem ativos e sem token de cadastro ainda utilizável.
 func (s *Server) deleteUnit(w http.ResponseWriter, r *http.Request) {
-	actor := actorFrom(r.Context())
 	id, ok := pathID(w, r, "unidade")
 	if !ok {
 		return
 	}
+	asOf, err := s.DeleteUnit(r.Context(), actorFrom(r.Context()), id)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"as_of": asOf, "unit_id": id})
+}
+
+// DeleteUnit apaga uma unidade vazia (DELETE /v1/units/{id} e o painel).
+func (s *Server) DeleteUnit(ctx context.Context, actor store.Actor, id uuid.UUID) (int64, error) {
 	var asOf int64
-	err := s.inTx(r.Context(), func(q *store.Queries) error {
-		if err := q.LockUnitTree(r.Context(), actor.TenantID); err != nil {
+	err := s.inTx(ctx, func(q *store.Queries) error {
+		if err := q.LockUnitTree(ctx, actor.TenantID); err != nil {
 			return err
 		}
-		u, err := q.GetUnitForUpdate(r.Context(), store.GetUnitForUpdateParams{ID: id, TenantID: actor.TenantID})
+		u, err := q.GetUnitForUpdate(ctx, store.GetUnitForUpdateParams{ID: id, TenantID: actor.TenantID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errorf(http.StatusNotFound, "unidade não encontrada")
 		}
 		if err != nil {
 			return err
 		}
-		// setAssetUnit trava esta mesma linha antes de pôr um ativo aqui:
+		// SetAssetUnit trava esta mesma linha antes de pôr um ativo aqui:
 		// nenhum entra na unidade enquanto ela é contada e apagada.
-		use, err := q.UnitUsage(r.Context(), &id)
+		use, err := q.UnitUsage(ctx, &id)
 		if err != nil {
 			return err
 		}
@@ -409,23 +426,19 @@ func (s *Server) deleteUnit(w http.ResponseWriter, r *http.Request) {
 			return errorf(http.StatusConflict, "unidade em uso: %d subunidade(s), %d ativo(s), %d token(s) de cadastro válidos",
 				use.Children, use.Assets, use.PendingTokens)
 		}
-		if err := q.DetachUnitTokens(r.Context(), &id); err != nil {
+		if err := q.DetachUnitTokens(ctx, &id); err != nil {
 			return err
 		}
-		if err := q.DeleteUnit(r.Context(), store.DeleteUnitParams{ID: id, TenantID: actor.TenantID}); err != nil {
+		if err := q.DeleteUnit(ctx, store.DeleteUnitParams{ID: id, TenantID: actor.TenantID}); err != nil {
 			return err
 		}
 		data, _ := json.Marshal(map[string]any{"unit_id": id, "parent_id": u.ParentID, "kind": u.Kind, "name": u.Name})
-		asOf, err = q.AppendChange(r.Context(), store.AppendChangeParams{
+		asOf, err = q.AppendChange(ctx, store.AppendChangeParams{
 			TenantID: actor.TenantID, Kind: "unit_deleted", ActorID: &actor.ID, Data: data,
 		})
 		return err
 	})
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"as_of": asOf, "unit_id": id})
+	return asOf, err
 }
 
 // assetInTenant trava o ativo do tenant ou responde 404.
@@ -439,7 +452,6 @@ func assetInTenant(ctx context.Context, q *store.Queries, id, tenant uuid.UUID) 
 
 // setAssetUnit: PUT /v1/assets/{id}/unit {"unit_id": "…" | null}.
 func (s *Server) setAssetUnit(w http.ResponseWriter, r *http.Request) {
-	actor := actorFrom(r.Context())
 	id, ok := pathID(w, r, "ativo")
 	if !ok {
 		return
@@ -448,36 +460,43 @@ func (s *Server) setAssetUnit(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	resp := AssetUnitResponse{AssetID: id, UnitID: req.UnitID}
-	err := s.inTx(r.Context(), func(q *store.Queries) error {
-		a, err := assetInTenant(r.Context(), q, id, actor.TenantID)
-		if err != nil {
-			return err
-		}
-		resp.PreviousUnitID = a.UnitID
-		if req.UnitID != nil {
-			// Trava a unidade: um DELETE simultâneo não a apaga com o ativo entrando.
-			if _, err := q.GetUnitForUpdate(r.Context(), store.GetUnitForUpdateParams{ID: *req.UnitID, TenantID: actor.TenantID}); errors.Is(err, pgx.ErrNoRows) {
-				return errorf(http.StatusNotFound, "unidade não encontrada")
-			} else if err != nil {
-				return err
-			}
-		}
-		if sameID(req.UnitID, a.UnitID) {
-			resp.AsOf, err = q.LatestChangeID(r.Context(), actor.TenantID)
-			return err
-		}
-		if err := q.SetAssetUnit(r.Context(), store.SetAssetUnitParams{ID: id, UnitID: req.UnitID}); err != nil {
-			return err
-		}
-		resp.AsOf, err = appendAssetMoved(r.Context(), q, actor.TenantID, id, &actor.ID, a.UnitID, req.UnitID)
-		return err
-	})
+	resp, err := s.SetAssetUnit(r.Context(), actorFrom(r.Context()), id, req.UnitID)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// SetAssetUnit põe o ativo numa unidade; unit nula tira de qualquer uma
+// (PUT /v1/assets/{id}/unit e o painel).
+func (s *Server) SetAssetUnit(ctx context.Context, actor store.Actor, id uuid.UUID, unit *uuid.UUID) (AssetUnitResponse, error) {
+	resp := AssetUnitResponse{AssetID: id, UnitID: unit}
+	err := s.inTx(ctx, func(q *store.Queries) error {
+		a, err := assetInTenant(ctx, q, id, actor.TenantID)
+		if err != nil {
+			return err
+		}
+		resp.PreviousUnitID = a.UnitID
+		if unit != nil {
+			// Trava a unidade: um DELETE simultâneo não a apaga com o ativo entrando.
+			if _, err := q.GetUnitForUpdate(ctx, store.GetUnitForUpdateParams{ID: *unit, TenantID: actor.TenantID}); errors.Is(err, pgx.ErrNoRows) {
+				return errorf(http.StatusNotFound, "unidade não encontrada")
+			} else if err != nil {
+				return err
+			}
+		}
+		if sameID(unit, a.UnitID) {
+			resp.AsOf, err = q.LatestChangeID(ctx, actor.TenantID)
+			return err
+		}
+		if err := q.SetAssetUnit(ctx, store.SetAssetUnitParams{ID: id, UnitID: unit}); err != nil {
+			return err
+		}
+		resp.AsOf, err = appendAssetMoved(ctx, q, actor.TenantID, id, &actor.ID, a.UnitID, unit)
+		return err
+	})
+	return resp, err
 }
 
 func appendAssetMoved(ctx context.Context, q *store.Queries, tenant, asset uuid.UUID, actor, from, to *uuid.UUID) (int64, error) {
@@ -487,28 +506,32 @@ func appendAssetMoved(ctx context.Context, q *store.Queries, tenant, asset uuid.
 
 // listLabels: GET /v1/assets/{id}/labels.
 func (s *Server) listLabels(w http.ResponseWriter, r *http.Request) {
-	actor := actorFrom(r.Context())
 	id, ok := pathID(w, r, "ativo")
 	if !ok {
 		return
 	}
-	if a, err := s.q.GetAsset(r.Context(), id); errors.Is(err, pgx.ErrNoRows) || (err == nil && a.TenantID != actor.TenantID) {
-		writeError(w, http.StatusNotFound, "ativo não encontrado")
-		return
-	} else if err != nil {
-		s.internalError(w, r, err)
+	resp, err := s.AssetLabels(r.Context(), actorFrom(r.Context()).TenantID, id)
+	if err != nil {
+		s.fail(w, r, err)
 		return
 	}
-	rows, err := s.q.ListAssetLabels(r.Context(), id)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// AssetLabels são as etiquetas de um ativo do tenant.
+func (s *Server) AssetLabels(ctx context.Context, tenant, id uuid.UUID) (AssetLabels, error) {
+	if err := requireAsset(ctx, s.q, id, tenant); err != nil {
+		return AssetLabels{}, err
+	}
+	rows, err := s.q.ListAssetLabels(ctx, id)
 	if err != nil {
-		s.internalError(w, r, err)
-		return
+		return AssetLabels{}, err
 	}
 	resp := AssetLabels{AssetID: id, Labels: map[string]string{}}
 	for _, l := range rows {
 		resp.Labels[l.Key] = l.Value
 	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nil
 }
 
 // setLabel: PUT /v1/assets/{id}/labels/{key} {"value": "..."}.
@@ -517,65 +540,77 @@ func (s *Server) setLabel(w http.ResponseWriter, r *http.Request)    { s.changeL
 func (s *Server) deleteLabel(w http.ResponseWriter, r *http.Request) { s.changeLabel(w, r, false) }
 
 func (s *Server) changeLabel(w http.ResponseWriter, r *http.Request, set bool) {
-	actor := actorFrom(r.Context())
 	id, ok := pathID(w, r, "ativo")
 	if !ok {
 		return
 	}
 	key := r.PathValue("key")
 	if !labelKey.MatchString(key) {
-		writeError(w, http.StatusBadRequest, "chave de etiqueta: minúsculas, dígitos, _ . -, até 63 caracteres, começando por letra ou dígito")
+		writeError(w, http.StatusBadRequest, errLabelKey)
 		return
 	}
-	var req LabelRequest
+	var value *string
 	if set {
+		var req LabelRequest
 		if !decodeBody(w, r, &req) {
 			return
 		}
-		if utf8.RuneCountInString(req.Value) > 256 || !utf8.ValidString(req.Value) || strings.ContainsRune(req.Value, 0) {
-			writeError(w, http.StatusBadRequest, "valor com mais de 256 caracteres ou inválido")
-			return
-		}
+		value = &req.Value
+	}
+	resp, err := s.ChangeLabel(r.Context(), actorFrom(r.Context()), id, key, value)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+const errLabelKey = "chave de etiqueta: minúsculas, dígitos, _ . -, até 63 caracteres, começando por letra ou dígito"
+
+// ChangeLabel cria ou troca a etiqueta do ativo; value nulo a remove
+// (PUT e DELETE /v1/assets/{id}/labels/{key} e o painel).
+func (s *Server) ChangeLabel(ctx context.Context, actor store.Actor, id uuid.UUID, key string, value *string) (LabelResponse, error) {
+	if !labelKey.MatchString(key) {
+		return LabelResponse{}, errorf(http.StatusBadRequest, "%s", errLabelKey)
+	}
+	if value != nil && (utf8.RuneCountInString(*value) > 256 || !utf8.ValidString(*value) || strings.ContainsRune(*value, 0)) {
+		return LabelResponse{}, errorf(http.StatusBadRequest, "valor com mais de 256 caracteres ou inválido")
 	}
 	resp := LabelResponse{AssetID: id, Key: key}
-	err := s.inTx(r.Context(), func(q *store.Queries) error {
-		if _, err := assetInTenant(r.Context(), q, id, actor.TenantID); err != nil {
+	err := s.inTx(ctx, func(q *store.Queries) error {
+		if _, err := assetInTenant(ctx, q, id, actor.TenantID); err != nil {
 			return err
 		}
-		prev, err := q.GetAssetLabel(r.Context(), store.GetAssetLabelParams{AssetID: id, Key: key})
+		prev, err := q.GetAssetLabel(ctx, store.GetAssetLabelParams{AssetID: id, Key: key})
 		if err == nil {
 			resp.PreviousValue = &prev.Value
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		kind := "label_set"
-		if set {
-			resp.Value = &req.Value
-			if resp.PreviousValue != nil && *resp.PreviousValue == req.Value {
-				resp.AsOf, err = q.LatestChangeID(r.Context(), actor.TenantID)
+		if value != nil {
+			resp.Value = value
+			if resp.PreviousValue != nil && *resp.PreviousValue == *value {
+				resp.AsOf, err = q.LatestChangeID(ctx, actor.TenantID)
 				return err
 			}
-			if err := q.SetAssetLabel(r.Context(), store.SetAssetLabelParams{AssetID: id, Key: key, Value: req.Value, SetBy: &actor.ID}); err != nil {
+			if err := q.SetAssetLabel(ctx, store.SetAssetLabelParams{AssetID: id, Key: key, Value: *value, SetBy: &actor.ID}); err != nil {
 				return err
 			}
 		} else {
 			if resp.PreviousValue == nil {
 				return errorf(http.StatusNotFound, "o ativo não tem a etiqueta %q", key)
 			}
-			if _, err := q.DeleteAssetLabel(r.Context(), store.DeleteAssetLabelParams{AssetID: id, Key: key}); err != nil {
+			if _, err := q.DeleteAssetLabel(ctx, store.DeleteAssetLabelParams{AssetID: id, Key: key}); err != nil {
 				return err
 			}
 			kind = "label_removed"
 		}
 		data, _ := json.Marshal(map[string]any{"key": key, "value": resp.Value, "previous_value": resp.PreviousValue})
-		resp.AsOf, err = q.AppendChange(r.Context(), store.AppendChangeParams{
+		resp.AsOf, err = q.AppendChange(ctx, store.AppendChangeParams{
 			TenantID: actor.TenantID, Kind: kind, AssetID: &id, ActorID: &actor.ID, Data: data,
 		})
 		return err
 	})
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp, err
 }

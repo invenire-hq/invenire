@@ -1,0 +1,31 @@
+{{define "content"}}
+<h1>{{t "setup.title"}}</h1>
+<p>{{t "setup.intro"}}</p>
+<form method="post" action="/setup" class="card stack">
+  {{with .Data.Error}}<p class="flash error" role="alert">{{.}}</p>{{end}}
+  <label>{{t "setup.code"}}
+    <input name="code" autocomplete="off" spellcheck="false" required autofocus placeholder="XXXX-XXXX-XXXX">
+    <small>{{t "setup.code_hint"}}</small>
+  </label>
+  <label>{{t "setup.org"}}
+    <input name="org" value="{{.Data.Org}}" maxlength="120" required placeholder="{{t "setup.org_example"}}">
+  </label>
+  <fieldset class="stack">
+    <legend>{{t "setup.admin"}}</legend>
+    <label>{{t "field.name"}}
+      <input name="name" value="{{.Data.Name}}" maxlength="120" autocomplete="name" required>
+    </label>
+    <label>{{t "field.email"}}
+      <input type="email" name="email" value="{{.Data.Email}}" autocomplete="username" required>
+    </label>
+    <label>{{t "field.password"}}
+      <input type="password" name="password" autocomplete="new-password" minlength="10" required>
+      <small>{{t "account.rule" 10}}</small>
+    </label>
+    <label>{{t "field.password2"}}
+      <input type="password" name="password2" autocomplete="new-password" minlength="10" required>
+    </label>
+  </fieldset>
+  <button class="primary">{{t "setup.submit"}}</button>
+</form>
+{{end}}

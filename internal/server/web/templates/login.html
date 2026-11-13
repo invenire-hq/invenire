@@ -1,0 +1,16 @@
+{{define "content"}}
+<h1>Invenire</h1>
+<form method="post" action="/login" class="card stack">
+  <h2>{{t "login.title"}}</h2>
+  {{with .Data.Error}}<p class="flash error" role="alert">{{.}}</p>{{end}}
+  <input type="hidden" name="volta" value="{{.Data.Return}}">
+  <label>{{t "field.email"}}
+    <input type="email" name="email" value="{{.Data.Email}}" autocomplete="username" required autofocus>
+  </label>
+  <label>{{t "field.password"}}
+    <input type="password" name="password" autocomplete="current-password" required>
+  </label>
+  <button class="primary">{{t "login.submit"}}</button>
+  <p class="hint">{{t "login.forgot"}}</p>
+</form>
+{{end}}

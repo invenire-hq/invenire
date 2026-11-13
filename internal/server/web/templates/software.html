@@ -1,0 +1,38 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>{{t "nav.software"}}</h1>
+<p><a href="/software/unmapped">{{t "software.unmapped"}} ›</a></p>
+<form method="get" action="/software" class="filters">
+  <label>{{t "col.product"}} <input name="product" value="{{$d.Product}}"></label>
+  <label>{{t "col.unit"}}
+    <select name="unit">
+      <option value="">{{t "filter.all"}}</option>
+      {{range $d.Units}}<option value="{{.ID}}" {{if eq .ID.String $d.Unit}}selected{{end}}>{{.Path}}</option>{{end}}
+    </select>
+  </label>
+  <button>{{t "action.filter"}}</button>
+  <a href="/software">{{t "action.clear"}}</a>
+</form>
+{{if $d.List.Items}}
+<table class="list">
+  <thead><tr><th>{{t "col.product"}}</th><th>{{t "col.vendor"}}</th><th class="num">{{t "software.machines"}}</th><th class="num">{{t "software.versions"}}</th><th></th></tr></thead>
+  <tbody>
+  {{range $d.List.Items}}
+  <tr>
+    <td><a href="/software/{{.ID}}">{{.Product}}</a></td>
+    <td>{{orDash (deref .Vendor)}}</td>
+    <td class="num">{{.AssetCount}}</td>
+    <td class="num">{{.VersionCount}}</td>
+    <td>{{if eq .Scope "tenant"}}<span class="badge">{{t "software.scope_tenant"}}</span>{{end}}</td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="hint">{{t "software.none"}}</p>
+{{end}}
+<p class="pager">
+  {{if $d.Paged}}<a href="/software?product={{$d.Product}}&amp;unit={{$d.Unit}}">{{t "action.first_page"}}</a>{{end}}
+  {{with $d.Next}}<a href="{{.}}">{{t "action.next_page"}}</a>{{end}}
+</p>
+{{end}}

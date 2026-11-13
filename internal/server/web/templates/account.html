@@ -1,0 +1,20 @@
+{{define "content"}}
+<h1>{{t "nav.account"}}</h1>
+<dl class="pairs">
+  <dt>{{t "field.name"}}</dt><dd>{{.S.Actor.Name}}</dd>
+  <dt>{{t "field.email"}}</dt><dd>{{.S.Email}}</dd>
+  <dt>{{t "nav.organization"}}</dt><dd>{{.S.TenantName}}</dd>
+  <dt>{{t "access.permission"}}</dt><dd>{{if .S.Admin}}{{t "scope.admin_long"}}{{else}}{{t "scope.read_long"}}{{end}}</dd>
+</dl>
+<form method="post" action="/account/password" class="card stack">
+  <h2>{{t "account.change"}}</h2>
+  {{template "csrf" .}}
+  <input type="email" name="email" value="{{.S.Email}}" autocomplete="username" hidden>
+  <label>{{t "account.current"}} <input type="password" name="current" autocomplete="current-password" required></label>
+  <label>{{t "account.new"}} <input type="password" name="password" autocomplete="new-password" minlength="{{.Data}}" required>
+    <small>{{t "account.rule" .Data}}</small></label>
+  <label>{{t "field.password2"}} <input type="password" name="password2" autocomplete="new-password" minlength="{{.Data}}" required></label>
+  <div><button class="primary">{{t "account.change"}}</button></div>
+  <p class="hint">{{t "account.sessions"}}</p>
+</form>
+{{end}}

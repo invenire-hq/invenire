@@ -43,7 +43,7 @@ const createActor = `-- name: CreateActor :one
 
 INSERT INTO actor (tenant_id, kind, name, scopes)
 VALUES ($1, $2, $3, $4)
-RETURNING id, tenant_id, kind, name, scopes, created_at, disabled_at
+RETURNING id, tenant_id, kind, name, scopes, created_at, disabled_at, login_id
 `
 
 type CreateActorParams struct {
@@ -70,6 +70,7 @@ func (q *Queries) CreateActor(ctx context.Context, arg CreateActorParams) (Actor
 		&i.Scopes,
 		&i.CreatedAt,
 		&i.DisabledAt,
+		&i.LoginID,
 	)
 	return i, err
 }
@@ -135,7 +136,7 @@ const ensureSystemActor = `-- name: EnsureSystemActor :one
 INSERT INTO actor (tenant_id, kind, name)
 VALUES ($1, 'system', $2)
 ON CONFLICT (tenant_id, kind, name) DO UPDATE SET name = EXCLUDED.name
-RETURNING id, tenant_id, kind, name, scopes, created_at, disabled_at
+RETURNING id, tenant_id, kind, name, scopes, created_at, disabled_at, login_id
 `
 
 type EnsureSystemActorParams struct {
@@ -155,12 +156,13 @@ func (q *Queries) EnsureSystemActor(ctx context.Context, arg EnsureSystemActorPa
 		&i.Scopes,
 		&i.CreatedAt,
 		&i.DisabledAt,
+		&i.LoginID,
 	)
 	return i, err
 }
 
 const getActiveActor = `-- name: GetActiveActor :one
-SELECT id, tenant_id, kind, name, scopes, created_at, disabled_at FROM actor WHERE id = $1 AND disabled_at IS NULL
+SELECT id, tenant_id, kind, name, scopes, created_at, disabled_at, login_id FROM actor WHERE id = $1 AND disabled_at IS NULL
 `
 
 func (q *Queries) GetActiveActor(ctx context.Context, id uuid.UUID) (Actor, error) {
@@ -174,6 +176,7 @@ func (q *Queries) GetActiveActor(ctx context.Context, id uuid.UUID) (Actor, erro
 		&i.Scopes,
 		&i.CreatedAt,
 		&i.DisabledAt,
+		&i.LoginID,
 	)
 	return i, err
 }

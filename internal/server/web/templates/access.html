@@ -1,0 +1,121 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>{{t "nav.access"}}</h1>
+
+{{with $d.New}}
+<section class="card secret" aria-live="polite">
+  <h2>{{t "access.token_new_title" .Actor.Name}}</h2>
+  <p class="warn">{{t "access.token_once"}}</p>
+  <div class="copyrow"><code class="token" id="novo-token">{{.Token}}</code> <button type="button" data-copy="novo-token">{{t "action.copy"}}</button></div>
+  <p class="hint">{{t "access.token_use"}}</p>
+  {{with .ExpiresAt}}<p>{{t "enroll.expires"}}: {{when .}}</p>{{end}}
+</section>
+{{end}}
+
+<section>
+  <h2>{{t "access.users"}}</h2>
+  <p class="hint">{{t "access.users_intro"}}</p>
+  <table class="list">
+    <thead><tr><th>{{t "field.name"}}</th><th>{{t "field.email"}}</th><th>{{t "access.permission"}}</th><th>{{t "col.created"}}</th><th></th></tr></thead>
+    <tbody>
+    {{range $d.Users}}
+    <tr{{if .DisabledAt}} class="off"{{end}}>
+      <td>{{.Name}}</td>
+      <td>{{.Email}}</td>
+      <td>{{if has .Scopes "admin"}}{{t "scope.admin"}}{{else}}{{t "scope.read"}}{{end}}</td>
+      <td>{{when .CreatedAt}}</td>
+      <td>
+        {{if .DisabledAt}}{{t "access.disabled_at" (when .DisabledAt)}}
+        {{else if ne .ID.String $.S.Actor.ID.String}}
+        <form method="post" action="/access/actors/{{.ID}}/disable" data-confirm="{{t "access.disable_confirm"}}">
+          {{template "csrf" $}}<button class="danger small">{{t "access.disable"}}</button>
+        </form>
+        {{else}}<span class="hint">{{t "access.you"}}</span>{{end}}
+      </td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>{{t "access.new_user"}}</h2>
+  <form method="post" action="/access/users" class="grid-form" autocomplete="off">
+    {{template "csrf" .}}
+    <label>{{t "field.name"}} <input name="name" maxlength="120" required></label>
+    <label>{{t "field.email"}} <input type="email" name="email" required autocomplete="off"></label>
+    <label>{{t "access.permission"}}
+      <select name="scope">
+        <option value="read">{{t "scope.read_long"}}</option>
+        <option value="admin">{{t "scope.admin_long"}}</option>
+      </select>
+    </label>
+    <label>{{t "access.initial_password"}} <input type="password" name="password" minlength="10" required autocomplete="new-password"></label>
+    <label>{{t "field.password2"}} <input type="password" name="password2" minlength="10" required autocomplete="new-password"></label>
+    <div><button class="primary">{{t "access.create_user"}}</button></div>
+  </form>
+  <p class="hint">{{t "access.password_hint"}}</p>
+</section>
+
+<section>
+  <h2>{{t "access.tokens"}}</h2>
+  <p class="hint">{{t "access.tokens_intro"}}</p>
+  {{if $d.Tokens}}
+  <table class="list">
+    <thead><tr><th>{{t "access.who"}}</th><th>{{t "access.kind"}}</th><th>{{t "access.permission"}}</th><th>{{t "field.description"}}</th><th>{{t "col.created"}}</th><th>{{t "enroll.expires"}}</th><th></th></tr></thead>
+    <tbody>
+    {{range $d.Tokens}}
+    <tr{{if or .RevokedAt .ActorDisabledAt}} class="off"{{end}}>
+      <td>{{.ActorName}}</td>
+      <td>{{label "kind." .ActorKind}}</td>
+      <td>{{if has .Scopes "admin"}}{{t "scope.admin"}}{{else}}{{t "scope.read"}}{{end}}</td>
+      <td>{{orDash .Description}}</td>
+      <td>{{when .CreatedAt}}</td>
+      <td>{{with .ExpiresAt}}{{when .}}{{else}}{{t "access.never_expires"}}{{end}}</td>
+      <td>
+        {{if .RevokedAt}}{{t "token.revoked"}}
+        {{else if .ActorDisabledAt}}{{t "access.actor_disabled"}}
+        {{else}}
+        <form method="post" action="/access/tokens/{{.ID}}/revoke" data-confirm="{{t "access.revoke_confirm"}}">
+          {{template "csrf" $}}<button class="danger small">{{t "action.revoke"}}</button>
+        </form>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}<p class="hint">{{t "access.no_tokens"}}</p>{{end}}
+</section>
+
+<section class="card">
+  <h2>{{t "access.new_token"}}</h2>
+  <form method="post" action="/access/tokens" class="grid-form">
+    {{template "csrf" .}}
+    <label>{{t "field.name"}} <input name="name" maxlength="120" required placeholder="{{t "access.token_name_example"}}"></label>
+    <label>{{t "access.kind"}}
+      <select name="kind">
+        <option value="ci">{{label "kind." "ci"}}</option>
+        <option value="ai_agent">{{label "kind." "ai_agent"}}</option>
+        <option value="human">{{label "kind." "human"}}</option>
+      </select>
+    </label>
+    <label>{{t "access.permission"}}
+      <select name="scope">
+        <option value="read">{{t "scope.read_long"}}</option>
+        <option value="admin">{{t "scope.admin_long"}}</option>
+      </select>
+    </label>
+    <label>{{t "enroll.validity"}}
+      <select name="ttl">
+        <option value="720h">{{t "ttl.30d"}}</option>
+        <option value="2160h" selected>{{t "ttl.90d"}}</option>
+        <option value="8760h">{{t "ttl.1y"}}</option>
+        <option value="0">{{t "access.never_expires"}}</option>
+      </select>
+    </label>
+    <label>{{t "field.description"}} <input name="description" maxlength="200"></label>
+    <div><button class="primary">{{t "access.create_token"}}</button></div>
+  </form>
+</section>
+{{end}}
