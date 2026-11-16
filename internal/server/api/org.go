@@ -17,7 +17,7 @@ import (
 	"github.com/athosbes/invenire/internal/server/store"
 )
 
-// Unidades: uma árvore livre dentro do tenant (Saúde → UBS Centro →
+// Unidades: uma árvore livre dentro do tenant (Sede → Financeiro →
 // Recepção). Cada ativo está em no máximo uma unidade; mudar de unidade é um
 // evento no change_log. Etiquetas são as dimensões que não são hierarquia.
 
@@ -115,7 +115,7 @@ func ValidUnitName(name string) error {
 	return nil
 }
 
-// ResolveUnitPath acha a unidade pelo caminho ("Saúde/UBS Centro").
+// ResolveUnitPath acha a unidade pelo caminho ("Sede/Financeiro").
 func ResolveUnitPath(ctx context.Context, q *store.Queries, tenant uuid.UUID, path string) (store.OrgUnit, error) {
 	var u store.OrgUnit
 	var parent *uuid.UUID

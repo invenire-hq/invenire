@@ -1,4 +1,5 @@
-# PostgreSQL para desenvolvimento. O servidor entra aqui quando existir.
+# PostgreSQL para desenvolvimento e testes (docs/desenvolvimento.md). Para
+# instalar o servidor de verdade, veja deploy/servidor e docs/instalar.
 #
 #   docker compose -f deploy/docker-compose.yml up -d
 #

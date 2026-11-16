@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/athosbes/invenire/internal/server/api"
 	"github.com/athosbes/invenire/internal/server/download"
@@ -199,7 +200,31 @@ func (p *Panel) Handler() http.Handler {
 	cop.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg("error.cross_origin"), http.StatusForbidden)
 	}))
-	return securityHeaders(cop.Handler(mux))
+	return securityHeaders(cop.Handler(utf8Forms(mux)))
+}
+
+// utf8Forms recusa com 400 o formulário que não vem em UTF-8 (um curl em
+// Latin-1, por exemplo). Sem isso o texto chegava ao PostgreSQL, que o
+// recusava, e a pessoa via um erro interno. O limite de 64 KiB é o das telas
+// logadas; o formulário fica lido e guardado em r.PostForm para o handler.
+func utf8Forms(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+			r.ParseForm()
+			for k, vs := range r.Form {
+				ok := utf8.ValidString(k)
+				for _, v := range vs {
+					ok = ok && utf8.ValidString(v)
+				}
+				if !ok {
+					http.Error(w, msg("error.encoding"), http.StatusBadRequest)
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 type handler func(w http.ResponseWriter, r *http.Request, s *session)

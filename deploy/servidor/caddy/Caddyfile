@@ -1,0 +1,21 @@
+# Caddy na frente do invenire-server (compose.caddy.yml). O domínio vem de
+# INVENIRE_DOMAIN no .env; o Caddy tira o certificado do Let's Encrypt na
+# primeira requisição e o renova sozinho, e manda HTTP para HTTPS.
+#
+# O Caddy já repassa Host, X-Forwarded-For (descartando o que o cliente
+# mandou), X-Forwarded-Proto e X-Forwarded-Host. Não precisa pedir
+# certificado cliente: o agente prova quem é assinando cada requisição.
+
+{$INVENIRE_DOMAIN} {
+	# Snapshot em gzip pode chegar a 32 MiB (o limite do servidor).
+	request_body {
+		max_size 32MB
+	}
+	reverse_proxy server:8080 {
+		# Snapshots grandes em links lentos.
+		transport http {
+			read_timeout 5m
+			write_timeout 5m
+		}
+	}
+}

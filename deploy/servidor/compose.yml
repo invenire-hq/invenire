@@ -1,0 +1,69 @@
+# invenire-server na rede local, sem domínio: PostgreSQL e servidor, subindo
+# sozinhos com a máquina. O servidor atende HTTPS direto na porta 8443, com
+# certificado emitido pela CA da própria instalação; os agentes reconhecem o
+# servidor pelo pin dessa CA. Roteiro: docs/instalar/rede-local.md.
+#
+#   cp .env.example .env    # e preencha (COMPOSE_FILE=compose.yml)
+#   docker compose up -d --build --wait
+#   docker compose logs server | grep "primeira configuração"
+#
+# O PostgreSQL não fica exposto: só o servidor fala com ele, pela rede interna.
+name: invenire-servidor
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: invenire
+      POSTGRES_PASSWORD: ${INVENIRE_PG_PASSWORD:?defina INVENIRE_PG_PASSWORD no .env}
+      POSTGRES_DB: invenire
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U invenire -d invenire"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  server:
+    # Ainda não há imagem publicada: --build monta a imagem a partir deste
+    # repositório. Com uma imagem pronta, aponte INVENIRE_IMAGE para ela.
+    image: ${INVENIRE_IMAGE:-invenire-server:dev}
+    build:
+      context: ../..
+      args:
+        VERSION: ${INVENIRE_VERSION:-dev}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      INVENIRE_DATABASE_URL: postgres://invenire:${INVENIRE_PG_PASSWORD}@postgres:5432/invenire?sslmode=disable
+      # Opcional: código da primeira configuração fixo, em vez do gerado.
+      INVENIRE_SETUP_CODE: ${INVENIRE_SETUP_CODE:-}
+    command:
+      - serve
+      - --listen
+      - :8443
+      - --data
+      - data
+      - --hosts
+      - ${INVENIRE_HOSTS:?defina INVENIRE_HOSTS no .env (nomes e IPs pelos quais as máquinas chamam o servidor)}
+    ports:
+      - "${INVENIRE_PORT:-8443}:8443"
+    volumes:
+      - data:/var/lib/invenire
+
+networks:
+  default:
+    ipam:
+      config:
+        # A mesma faixa dos outros compose*.yml, para trocar de cenário sem
+        # recriar a rede. Se colidir com a sua rede, mude em todos (e em
+        # INVENIRE_TRUSTED_PROXIES).
+        - subnet: 172.31.250.0/24
+
+volumes:
+  pgdata:
+  data:

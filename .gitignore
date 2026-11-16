@@ -4,7 +4,5 @@ snapshot*.json
 !pkg/snapshot/schema/*.json
 /data/
 /dist/
-deploy/piloto/.env
-deploy/piloto/backup/
 deploy/servidor/.env
 deploy/servidor/backup/

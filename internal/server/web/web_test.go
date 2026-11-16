@@ -233,6 +233,21 @@ func TestSetup(t *testing.T) {
 		t.Fatalf("setup recusado criou %d tenant(s)", n)
 	}
 
+	// Texto em Latin-1 (curl de um terminal que não é UTF-8): 400, e não o
+	// erro interno do PostgreSQL recusando a codificação.
+	latin1 := url.Values{}
+	for k, v := range form {
+		latin1[k] = v
+	}
+	latin1.Set("code", "abcdefghjklm")
+	latin1.Set("org", "Organiza\xe7\xe3o")
+	if st, body, _ := b.do("POST", "/setup", latin1); st != http.StatusBadRequest || !strings.Contains(body, "UTF-8") {
+		t.Fatalf("setup com texto que não é UTF-8: %d, queria 400 (%q)", st, body)
+	}
+	if n, _ := e.q.CountTenants(context.Background()); n != 0 {
+		t.Fatalf("setup em Latin-1 criou %d tenant(s)", n)
+	}
+
 	// Código certo (sem hífens e em minúsculas também vale).
 	form.Set("code", "abcdefghjklm")
 	st, _, h := b.do("POST", "/setup", form)

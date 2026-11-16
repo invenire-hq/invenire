@@ -7,10 +7,14 @@ campo ou mudar o sentido dele exige `format_version` nova. As structs Go que o d
 [`internal/server/export/format.go`](../internal/server/export/format.go).
 
 ```sh
-invenire-server tenant export --tenant "Prefeitura" --out prefeitura.invenire.tar.gz [--with-ca-key]
-invenire-server tenant verify prefeitura.invenire.tar.gz [--export-key <chave>]
-curl -H "Authorization: Bearer inva_…" -OJ "https://invenire/v1/export?with_ca_key=true"   # escopo admin
+invenire-server tenant export --tenant "Minha Organização" --out minha-organizacao.invenire.tar.gz [--with-ca-key]
+invenire-server tenant verify minha-organizacao.invenire.tar.gz [--export-key <chave>]
+curl -H "Authorization: Bearer inva_…" -OJ "https://invenire.exemplo.org/v1/export?with_ca_key=true"   # escopo admin
 ```
+
+No painel, a mesma exportação está em **Exportar** (administrador). Na instalação com Docker, o
+`tenant export` roda dentro do contêiner e grava o pacote lá; a API ou o painel entregam o
+arquivo direto.
 
 ## O que vai e o que não vai
 
@@ -57,7 +61,7 @@ minúsculo e bytes (`key_sealed`) em base64.
 {
   "format": "invenire-tenant-export",
   "format_version": 1,
-  "tenant": {"id": "35ff3283-…", "name": "Prefeitura"},
+  "tenant": {"id": "35ff3283-…", "name": "Minha Organização"},
   "exported_at": "2026-11-10T14:00:28Z",
   "server_version": "0.3.0",
   "as_of": 421,

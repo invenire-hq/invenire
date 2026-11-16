@@ -28,7 +28,7 @@ func TestInventoryFlow(t *testing.T) {
 	q, _ := setup(t)
 	ctx := context.Background()
 
-	tenant, err := q.CreateTenant(ctx, "Prefeitura de Teste")
+	tenant, err := q.CreateTenant(ctx, "Organização de Teste")
 	if err != nil {
 		t.Fatal(err)
 	}

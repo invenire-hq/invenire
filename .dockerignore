@@ -5,4 +5,5 @@ dist
 backup
 *.exe
 snapshot*.json
-deploy/piloto/.env
+deploy/servidor/.env
+deploy/servidor/backup

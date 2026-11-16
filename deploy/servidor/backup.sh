@@ -1,13 +1,14 @@
 #!/bin/sh
-# Backup do servidor do piloto: o banco (pg_dump) e os dados do servidor
+# Backup do servidor: o banco (pg_dump) e os dados do servidor
 # (CA da instalação e chave-mestra). Um sem o outro não restaura: sem a
 # chave-mestra o servidor não emite crachás; sem a CA os agentes deixam de
 # reconhecer o servidor.
 #
 #   ./backup.sh [diretório]      (padrão: ./backup)
 #
-# Rode na pasta deploy/piloto, com o compose de pé. Para todo dia, no cron:
-#   0 2 * * * cd /opt/invenire/deploy/piloto && ./backup.sh /var/backups/invenire
+# Rode na pasta deploy/servidor, com o compose de pé (o .env diz qual
+# compose*.yml, em COMPOSE_FILE). Para todo dia, no cron:
+#   0 2 * * * cd /opt/invenire/deploy/servidor && ./backup.sh /var/backups/invenire
 set -eu
 
 dest=${1:-./backup}

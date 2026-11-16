@@ -1,191 +1,63 @@
 # Roteiro do piloto
 
-Até umas 20 máquinas, Windows e Linux, com o servidor numa máquina Linux com Docker. O
-objetivo é descobrir o que quebra no mundo real antes de abrir o projeto e antes do primeiro
-contrato: coletores, rede, relógio, antivírus, nomes de software que as regras não conhecem.
+Até umas 20 máquinas, Windows e Linux, por duas semanas. O objetivo é descobrir o que quebra no
+mundo real antes de ampliar: coletores, rede, relógio, antivírus, proxy, nomes de software que as
+regras não conhecem. Este roteiro só diz a ordem; o como está nos documentos indicados.
 
 ## 0. Antes de começar
 
-- [ ] Uma máquina Linux para o servidor, com Docker e o plugin `compose`, que as máquinas do
-      piloto alcancem por nome ou IP na porta escolhida (padrão 8443).
-- [ ] O nome DNS e o IP pelos quais as máquinas vão chamar o servidor. Eles entram no
-      certificado do servidor (`INVENIRE_HOSTS`); um endereço fora da lista é recusado pelo
-      agente.
+- [ ] Escolher o cenário do servidor ([escolha.md](instalar/escolha.md)) e ter o que o roteiro
+      dele pede (máquina, endereço, domínio, portas).
 - [ ] A lista das máquinas: hostname, sistema, setor e quem é o responsável. Misture Windows e
       Linux, desktop e servidor, e pelo menos uma máquina que fique desligada às vezes.
 - [ ] Um lugar para os backups fora da máquina do servidor.
-- [ ] Um teste do agente como serviço do Windows numa máquina sua, com PowerShell como
-      administrador (passo 4), antes de levar às máquinas dos outros.
+- [ ] Um teste do agente numa máquina sua antes de levar às máquinas dos outros.
 
-## 1. Montar a versão
+## 1. Servidor
 
-Numa máquina com Go e Git:
+Siga o roteiro do cenário até a primeira máquina `em-dia`:
+[rede local](instalar/rede-local.md), [VPS](instalar/vps.md) ou
+[proxy reverso](instalar/proxy-reverso.md). Configure o backup diário no mesmo dia
+([operacao.md](operacao.md#backup)).
 
-```sh
-scripts/build.sh 0.1.0
-```
+## 2. Unidades e tokens
 
-Gera `dist/0.1.0/` com o agente para Windows e Linux (amd64 e arm64), o servidor, os scripts
-de instalação e o `SHA256SUMS`. Copie a pasta inteira para um compartilhamento que as máquinas
-do piloto leiam. Os scripts conferem o executável contra o `SHA256SUMS` antes de instalar.
+Em **Unidades**, crie a árvore que fizer sentido (por prédio, setor, sala). Em **Adicionar
+máquinas**, um token por unidade deixa cada máquina já no lugar certo; para um lote, aumente
+**Quantas máquinas** (por exemplo, 10) e use validade curta. Revogue o token quando o lote
+terminar ou se o pacote se perder; as máquinas já cadastradas continuam.
 
-## 2. Subir o servidor
+## 3. Instalar nas máquinas
 
-Na máquina do servidor, com o repositório em `/opt/invenire`:
+Pelo pacote do painel ou pelo comando de uma linha ([agentes.md](agentes.md#instalar)). O mesmo
+pacote de um token de várias máquinas serve a todo o lote, por pendrive se for preciso; guarde-o
+como uma senha e apague-o no fim.
 
-```sh
-cd /opt/invenire/deploy/piloto
-cp .env.example .env
-openssl rand -hex 24          # cole em INVENIRE_PG_PASSWORD
-vi .env                       # INVENIRE_HOSTS=invenire.prefeitura.local,10.0.0.5
-docker compose up -d --build --wait
-docker compose logs server | tail -3
-```
+## 4. Acompanhar
 
-A linha `invenire-server no ar` mostra `ca_sha256`: é o pin que os agentes usam para
-reconhecer o servidor. O servidor e o PostgreSQL voltam sozinhos quando a máquina reinicia.
+**Visão geral** no painel, todo dia, ou o `status` no cron
+([operacao.md](operacao.md#monitorar)). O que cada estado quer dizer e o que fazer:
+[problemas.md](problemas.md#estados-das-máquinas).
 
-Os comandos de administração rodam dentro do contêiner. Para não repetir o prefixo:
-
-```sh
-alias inv='docker compose -f /opt/invenire/deploy/piloto/compose.yml exec server invenire-server'
-```
-
-## 3. Organização e token
-
-```sh
-inv tenant create "Prefeitura"
-inv unit create --tenant "Prefeitura" --kind secretaria "Saúde"
-inv unit create --tenant "Prefeitura" --parent "Saúde" --kind ubs "UBS Centro"
-inv token create --tenant "Prefeitura" --unit "Saúde/UBS Centro" --uses 10 --ttl 72h --description "piloto, lote 1"
-```
-
-Um token com `--uses 10` cadastra até dez máquinas, todas na unidade dada. Anote o `id` e o
-`ca pin`. Se o token vazar, corte na hora; as máquinas já cadastradas continuam:
-
-```sh
-inv token list --tenant "Prefeitura"
-inv token revoke --tenant "Prefeitura" <id>
-```
-
-Um token por unidade deixa cada máquina já no lugar certo. Máquinas fora de unidade podem ser
-postas depois pela API (`PUT /v1/assets/{id}/unit`).
-
-## 4. Instalar nas máquinas
-
-**Pelo painel (o mais simples).** Crie o token em Adicionar máquinas e, na mesma tela, baixe o
-pacote: no Windows, extraia o `.zip` e dê dois cliques em `Instalar.cmd`; no Linux,
-`tar xzf invenire-agente-linux.tar.gz && sudo ./invenire-agente/instalar.sh`. O pacote já traz
-endereço, pin, token e o executável. Com um token de várias máquinas, o mesmo pacote (num
-pendrive, por exemplo) serve a todas; guarde-o como uma senha e apague-o no fim do lote. Com
-certificado público, a tela também mostra um comando de uma linha. Detalhes no README
-("Instalar o agente pelo painel").
-
-**Pela pasta da versão**, com os comandos de sempre:
-
-**Windows** (PowerShell **como administrador**, na pasta da versão):
-
-```powershell
-$env:INVENIRE_ENROLL_TOKEN = "inv_..."
-.\instalar.ps1 -Server https://invenire.prefeitura.local:8443 -CaPin sha256:...
-```
-
-**Linux** (root, na pasta da versão):
-
-```sh
-sudo INVENIRE_ENROLL_TOKEN=inv_... ./instalar.sh --server https://invenire.prefeitura.local:8443 --ca-pin sha256:...
-```
-
-Nos dois casos, o script confere o executável, cadastra, instala o serviço e confirma que ele está rodando.
-Rodar de novo não cadastra outra vez: só atualiza o serviço para o executável da pasta. É
-assim que se atualiza o agente numa versão nova. `-Force` / `--force` cadastra de novo e
-revoga o crachá anterior da máquina.
-
-Num compartilhamento só leitura no Linux, copie a pasta para a máquina antes, se o executável
-não estiver marcado como executável.
-
-## 5. Acompanhar
-
-```sh
-inv status --tenant "Prefeitura"
-```
-
-Uma linha por máquina, as que precisam de atenção primeiro:
-
-| Estado | Quer dizer | O que fazer |
-|---|---|---|
-| `em-dia` | o agente apareceu dentro do limite e tudo foi ingerido | nada |
-| `na-fila` | snapshots esperando a ingestão | normal por alguns segundos; se persistir, veja os logs do servidor |
-| `sem-coleta` | cadastrado, mas nenhum snapshot chegou | o serviço não subiu ou não alcança o servidor: veja o log do agente |
-| `atrasado` | o agente não aparece há mais de 12h (`--stale`) | máquina desligada, sem rede, ou serviço parado |
-| `erro` | algum snapshot não pôde ser ingerido | o motivo aparece no fim do `status`; abra um issue com ele |
-| `sem-agente` | o agente foi revogado (ou a máquina recadastrada) | recadastre se a máquina ainda é do piloto |
-
-O fim do `status` resume sistemas, versões do agente, nomes de software ainda sem produto e
-quantos cadastros restam nos tokens. Para avisar sozinho, no cron:
-
-```sh
-0 8 * * * docker compose -f /opt/invenire/deploy/piloto/compose.yml exec -T server invenire-server status --tenant "Prefeitura" --check || <avisar>
-```
-
-Logs do agente: no Windows, Visualizador de Eventos → Aplicativo, origem `invenire-agent`; no
-Linux, `journalctl -u invenire-agent`.
-
-O inventário em si sai pela API (crie um usuário com `inv actor create --tenant "Prefeitura"
---name athos --scopes read,admin`): `GET /v1/assets`, `GET /v1/assets/{id}/software`,
-`GET /v1/software`, `GET /v1/software/unmapped`.
-
-## 6. Backup
-
-```sh
-cd /opt/invenire/deploy/piloto
-./backup.sh /var/backups/invenire
-```
-
-Grava o dump do banco e os dados do servidor (CA da instalação e chave-mestra) numa pasta com
-data e `SHA256SUMS`, e mantém os 14 mais novos. Um sem o outro não restaura. Ponha no cron
-(`0 2 * * *`) e copie a pasta para fora da máquina. A senha do banco está no `.env`; guarde-a
-também.
-
-Para restaurar numa máquina nova, com o repositório e o `.env` no lugar:
-
-```sh
-./restaurar.sh /var/backups/invenire/20261110-161950
-```
-
-Restaurado com a mesma CA, o servidor é reconhecido pelos agentes sem nada mudar neles. Se o
-endereço mudou, em cada máquina: `invenire-agent set-server --server https://novo:8443
---ca-pin sha256:...` e reinicie o serviço. O roteiro foi testado assim: instalação pelo script,
-backup, restauração em outro projeto e `set-server` do agente para o restaurado.
-
-Uma cópia portátil de um tenant, para guardar ou levar para outro servidor, é o
-`inv tenant export` (veja [exportacao.md](exportacao.md)).
-
-## 7. Desinstalar
-
-Windows (PowerShell como administrador):
-`& "$env:ProgramFiles\Invenire\invenire-agent.exe" service uninstall`. Linux:
-`sudo /usr/local/bin/invenire-agent service uninstall`. O estado (`C:\ProgramData\Invenire` ou
-`/var/lib/invenire`) fica; apague a pasta para sumir com o crachá. No servidor, revogue o
-agente para ele parar de ser aceito.
-
-## 8. Critérios de sucesso
+## 5. Critérios de sucesso
 
 Ao fim de duas semanas:
 
-- [ ] todas as máquinas `em-dia` no `status`, exceto as desligadas de propósito;
+- [ ] todas as máquinas `em-dia`, exceto as desligadas de propósito;
 - [ ] nenhum snapshot com `erro`, ou cada um com issue aberto;
 - [ ] nenhuma corrente quebrada sem explicação (relógio, restauração de imagem, clonagem);
 - [ ] software instalado conferido à mão em três máquinas, uma de cada sistema, contra o que
       o Windows ou o gerenciador de pacotes mostra;
-- [ ] os nomes sem produto mais comuns mapeados (à mão ou por regra nova no catálogo);
-- [ ] um backup restaurado de verdade;
-- [ ] uma atualização do agente feita pelo script em pelo menos duas máquinas;
+- [ ] os nomes sem produto mais comuns mapeados (à mão, em **Software**, ou por regra nova no
+      catálogo);
+- [ ] um backup restaurado de verdade ([operacao.md](operacao.md#restauração));
+- [ ] uma atualização do agente feita pelo instalador em pelo menos duas máquinas
+      ([agentes.md](agentes.md#atualizar));
 - [ ] anotado o que os responsáveis das máquinas estranharam (CPU, antivírus, perguntas).
 
-## 9. O que anotar
+## 6. O que anotar
 
-Cada surpresa vira issue com o hostname, o sistema, a versão do agente e o que aconteceu. As
-que mais importam para depois: coletor que falha em algum sistema, nome de software que as
-regras erram, máquina clonada (duas com o mesmo `smbios_uuid`), relógio errado, proxy ou
-antivírus que bloqueia o agente.
+Cada surpresa vira issue com o hostname, o sistema, a versão do agente e o que aconteceu. As que
+mais importam para depois: coletor que falha em algum sistema, nome de software que as regras
+erram, máquina clonada (duas com o mesmo `smbios_uuid`), relógio errado, proxy ou antivírus que
+bloqueia o agente, e o que confundiu no painel ou na instalação.

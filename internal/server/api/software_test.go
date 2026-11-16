@@ -237,7 +237,7 @@ func TestMappingIsPerTenant(t *testing.T) {
 	// A mapeia o sistema interno para um produto que não está no catálogo:
 	// ele fica só de A, e B continua sem produto para o nome.
 	var mA api.MapResponse
-	if status := e.call("PUT", "/v1/software/raw/"+internal, adminA, api.MapRequest{Vendor: "Prefeitura", Product: "Protocolo"}, &mA); status != http.StatusOK || mA.ProductScope != "tenant" || mA.AssetsToApply != 1 {
+	if status := e.call("PUT", "/v1/software/raw/"+internal, adminA, api.MapRequest{Vendor: "Minha Organização", Product: "Protocolo"}, &mA); status != http.StatusOK || mA.ProductScope != "tenant" || mA.AssetsToApply != 1 {
 		t.Fatalf("mapear em A: %d %+v", status, mA)
 	}
 	if _, err := worker.Drain(ctx); err != nil {
@@ -255,7 +255,7 @@ func TestMappingIsPerTenant(t *testing.T) {
 
 	// B usa o mesmo nome de produto: ganha o seu, não o de A.
 	var mB api.MapResponse
-	e.call("PUT", "/v1/software/raw/"+internal, adminB, api.MapRequest{Vendor: "Prefeitura", Product: "Protocolo"}, &mB)
+	e.call("PUT", "/v1/software/raw/"+internal, adminB, api.MapRequest{Vendor: "Minha Organização", Product: "Protocolo"}, &mB)
 	if mB.ProductScope != "tenant" || mB.SoftwareID == mA.SoftwareID {
 		t.Fatalf("B reaproveitou o produto privado de A: %+v %+v", mB, mA)
 	}

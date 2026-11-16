@@ -5,8 +5,8 @@
 //	invenire-server user set-password --email <e-mail>
 //	invenire-server tenant export --tenant <nome> --out <arquivo>
 //	invenire-server tenant verify <arquivo>
-//	invenire-server token create --tenant <nome> [--unit Saúde/UBS Centro]
-//	invenire-server unit create --tenant <nome> [--parent Saúde] [--kind setor] <nome>
+//	invenire-server token create --tenant <nome> [--unit Sede/Financeiro]
+//	invenire-server unit create --tenant <nome> [--parent Sede] [--kind setor] <nome>
 //
 // A conexão com o PostgreSQL vem de INVENIRE_DATABASE_URL.
 package main
@@ -397,7 +397,7 @@ const exportKeyEnv = "INVENIRE_EXPORT_KEY"
 func runTenantExport(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("tenant export", flag.ExitOnError)
 	tenant := fs.String("tenant", "", "nome do tenant (obrigatório)")
-	out := fs.String("out", "", "arquivo do pacote, ex.: prefeitura.invenire.tar.gz (obrigatório)")
+	out := fs.String("out", "", "arquivo do pacote, ex.: minha-organizacao.invenire.tar.gz (obrigatório)")
 	withKey := fs.Bool("with-ca-key", false, "inclui a chave da CA do tenant, cifrada com uma chave de exportação mostrada uma vez")
 	dataDir := fs.String("data", "data", "diretório de dados do servidor (chave-mestra, só com --with-ca-key)")
 	fs.Parse(args)
@@ -613,7 +613,7 @@ func runTokenCreate(ctx context.Context, args []string) error {
 	tenant := fs.String("tenant", "", "nome do tenant (obrigatório)")
 	ttl := fs.Duration("ttl", 24*time.Hour, "validade do token")
 	desc := fs.String("description", "", "para que ou para quem é o token")
-	unit := fs.String("unit", "", "caminho da unidade onde a máquina entra, ex.: Saúde/UBS Centro")
+	unit := fs.String("unit", "", "caminho da unidade onde a máquina entra, ex.: Sede/Financeiro")
 	uses := fs.Int("uses", 1, "quantas máquinas o token cadastra (um lote, como o piloto); revogue com token revoke")
 	dataDir := fs.String("data", "data", "diretório de dados do servidor, para mostrar o pin da CA")
 	fs.Parse(args)
@@ -868,7 +868,7 @@ func runTokenRevoke(ctx context.Context, args []string) error {
 func runUnitCreate(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("unit create", flag.ExitOnError)
 	tenant := fs.String("tenant", "", "nome do tenant (obrigatório)")
-	parent := fs.String("parent", "", "caminho da unidade-mãe, ex.: Saúde/UBS Centro; vazio = raiz")
+	parent := fs.String("parent", "", "caminho da unidade-mãe, ex.: Sede/Financeiro; vazio = raiz")
 	kind := fs.String("kind", "", "tipo da camada, livre: secretaria, site, setor…")
 	fs.Parse(args)
 	if *tenant == "" || fs.NArg() != 1 {

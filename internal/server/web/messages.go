@@ -98,6 +98,7 @@ var ptBR = map[string]string{
 	"error.forbidden":    "Seu acesso é só de consulta: peça a um administrador.",
 	"error.csrf":         "O formulário expirou ou não veio desta página. Volte, recarregue e tente de novo.",
 	"error.cross_origin": "Envio de formulário de outro site recusado.",
+	"error.encoding":     "O formulário não veio em UTF-8. Use o navegador ou envie o texto em UTF-8.",
 	"error.back":         "Voltar ao início",
 	"error.bad_unit":     "Unidade inválida.",
 

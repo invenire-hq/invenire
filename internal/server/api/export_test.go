@@ -112,7 +112,7 @@ func TestTenantExport(t *testing.T) {
 	}
 	var mapped api.MapResponse
 	if status := e.call("PUT", "/v1/software/raw/"+unmapped.Items[0].ID.String(), admin,
-		api.MapRequest{Vendor: "Prefeitura", Product: "Sistema Interno"}, &mapped); status != http.StatusOK || mapped.ProductScope != "tenant" {
+		api.MapRequest{Vendor: "Minha Organização", Product: "Sistema Interno"}, &mapped); status != http.StatusOK || mapped.ProductScope != "tenant" {
 		t.Fatalf("mapear: %d %+v", status, mapped)
 	}
 
