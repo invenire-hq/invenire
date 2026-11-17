@@ -1,13 +1,17 @@
 package runner_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,6 +25,7 @@ import (
 	"github.com/athosbes/invenire/internal/server/pki"
 	"github.com/athosbes/invenire/internal/server/store"
 	"github.com/athosbes/invenire/internal/testdb"
+	"github.com/athosbes/invenire/internal/wire"
 	"github.com/athosbes/invenire/pkg/snapshot"
 )
 
@@ -36,6 +41,10 @@ type env struct {
 	pin    []byte
 	tenant store.Tenant
 	down   atomic.Bool // servidor fora do ar (503)
+	// proxy, se definido, fica entre o agente e o servidor: recebe cada
+	// requisição e o handler do servidor, para simular um proxy mal
+	// configurado.
+	proxy atomic.Pointer[func(w http.ResponseWriter, r *http.Request, next http.Handler)]
 }
 
 func newEnv(t *testing.T) *env {
@@ -61,6 +70,10 @@ func newEnv(t *testing.T) *env {
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if e.down.Load() {
 			http.Error(w, "fora do ar", http.StatusServiceUnavailable)
+			return
+		}
+		if p := e.proxy.Load(); p != nil {
+			(*p)(w, r, h)
 			return
 		}
 		h.ServeHTTP(w, r)
@@ -198,6 +211,134 @@ func TestQueueAndDelivery(t *testing.T) {
 	a.Enqueue(ctx)
 	if _, err := a.Flush(ctx); !errors.Is(err, runner.ErrRevoked) || pending() != 1 {
 		t.Fatalf("revogado: err=%v fila=%d", err, pending())
+	}
+}
+
+// Um proxy mal configurado no caminho não pode parar o agente nem fazer
+// perder snapshots: o 401 que não é de revogação e o 413 do proxy deixam o
+// snapshot na fila, e ele sai quando o proxy é corrigido.
+func TestMisconfiguredProxy(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	dir, err := state.OpenUnrestricted(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := runner.Enroll(ctx, dir, e.enrollOpts(e.token(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := thisHost
+	a := &runner.Agent{Dir: dir, Version: "test", Log: quiet, Collect: collector(&host)}
+	if err := a.Open(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Enqueue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	pending := func() int {
+		n, err := a.Pending()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	rejected := func() int {
+		ents, err := os.ReadDir(filepath.Join(dir.QueueDir(), "rejected"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(ents)
+	}
+	// Proxy que termina o TLS: o servidor só vê a assinatura.
+	terminatesTLS := func(r *http.Request) *http.Request {
+		r = r.Clone(r.Context())
+		r.TLS = nil
+		return r
+	}
+	snapshots := func(r *http.Request) bool {
+		return r.Method == http.MethodPost && r.URL.Path == wire.PathSnapshots
+	}
+
+	cases := []struct {
+		name  string
+		proxy func(w http.ResponseWriter, r *http.Request, next http.Handler)
+		want  string
+	}{
+		{"proxy que reescreve o corpo", func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			r = terminatesTLS(r)
+			if snapshots(r) {
+				body, _ := io.ReadAll(r.Body)
+				body = append(body, 0) // o corpo muda depois da assinatura
+				r.Body, r.ContentLength = io.NopCloser(bytes.NewReader(body)), int64(len(body))
+			}
+			next.ServeHTTP(w, r)
+		}, "assinatura inválida"},
+		{"proxy que não repassa a assinatura", func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			r = terminatesTLS(r)
+			r.Header.Del(wire.AgentCertHeader)
+			next.ServeHTTP(w, r)
+		}, "crachá do agente obrigatório"},
+		{"proxy com login próprio", func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="intranet"`)
+			http.Error(w, "<html>401 Authorization Required</html>", http.StatusUnauthorized)
+		}, "401 Authorization Required"},
+		{"proxy com limite de corpo baixo", func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			if snapshots(r) {
+				w.Header().Set("Content-Type", "text/html")
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				io.WriteString(w, "<html><center><h1>413 Request Entity Too Large</h1></center><hr><center>nginx</center></html>")
+				return
+			}
+			next.ServeHTTP(w, r)
+		}, "413 Request Entity Too Large"},
+	}
+	for _, c := range cases {
+		e.proxy.Store(&c.proxy)
+		_, err := a.Flush(ctx)
+		if err == nil || errors.Is(err, runner.ErrRevoked) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err=%v, esperava erro momentâneo com %q", c.name, err, c.want)
+		}
+		if pending() != 1 || rejected() != 0 {
+			t.Errorf("%s: fila=%d rejeitados=%d, esperava o snapshot na fila", c.name, pending(), rejected())
+		}
+	}
+
+	// Proxy corrigido (e terminando o TLS): o snapshot que esperou é entregue.
+	fixed := func(w http.ResponseWriter, r *http.Request, next http.Handler) { next.ServeHTTP(w, terminatesTLS(r)) }
+	e.proxy.Store(&fixed)
+	if sent, err := a.Flush(ctx); err != nil || sent != 1 || pending() != 0 {
+		t.Fatalf("proxy corrigido: enviados=%d err=%v fila=%d", sent, err, pending())
+	}
+
+	// Revogação atrás do proxy continua parando o agente, sem perder o
+	// snapshot.
+	if err := e.q.RevokeAgent(ctx, mustUUID(t, cfg.AgentID)); err != nil {
+		t.Fatal(err)
+	}
+	// O servidor marca a recusa com o código de revogação (wire.Error.Code),
+	// que é o que o agente confere.
+	var codes []string
+	recording := func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		rec := httptest.NewRecorder()
+		next.ServeHTTP(rec, terminatesTLS(r))
+		var body wire.Error
+		if rec.Code == http.StatusUnauthorized && json.Unmarshal(rec.Body.Bytes(), &body) == nil {
+			codes = append(codes, body.Code)
+		}
+		for k, v := range rec.Header() {
+			w.Header()[k] = v
+		}
+		w.WriteHeader(rec.Code)
+		w.Write(rec.Body.Bytes())
+	}
+	e.proxy.Store(&recording)
+	a.Enqueue(ctx)
+	if _, err := a.Flush(ctx); !errors.Is(err, runner.ErrRevoked) || pending() != 1 || rejected() != 0 {
+		t.Fatalf("revogado atrás do proxy: err=%v fila=%d rejeitados=%d", err, pending(), rejected())
+	}
+	if len(codes) != 1 || codes[0] != wire.ErrorCodeAgentRevoked {
+		t.Fatalf("códigos do 401: %q", codes)
 	}
 }
 

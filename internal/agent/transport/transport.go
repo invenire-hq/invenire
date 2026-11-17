@@ -27,6 +27,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -34,22 +35,51 @@ import (
 	"github.com/athosbes/invenire/internal/wire"
 )
 
-// HTTPError é uma resposta de erro do servidor.
+// HTTPError é uma resposta de erro do servidor, ou de um proxy no caminho.
 type HTTPError struct {
 	Status int
 	Msg    string
+	// Code é o wire.Error.Code da resposta; vazio quando a resposta não o
+	// trouxe (servidor antigo, ou resposta de um proxy).
+	Code string
 }
 
 func (e *HTTPError) Error() string {
 	return fmt.Sprintf("servidor respondeu %d: %s", e.Status, e.Msg)
 }
 
+// Mensagens de recusa do crachá dos servidores anteriores a wire.Error.Code.
+// Servem só para reconhecer a revogação vinda de um servidor antigo.
+var legacyRevokedMsgs = []string{"agente desconhecido ou revogado", "certificado cliente inválido ou vencido"}
+
+// Revoked diz se o servidor recusou o crachá em si: agente revogado ou
+// desconhecido, ou crachá vencido. Só um cadastro novo resolve. Outros 401
+// (assinatura que não confere, crachá ausente, relógio) costumam ser de um
+// proxy mal configurado no caminho e não contam: o crachá pode estar bom.
+func (e *HTTPError) Revoked() bool {
+	if e.Status != http.StatusUnauthorized {
+		return false
+	}
+	switch e.Code {
+	case wire.ErrorCodeAgentRevoked, wire.ErrorCodeBadgeInvalid:
+		return true
+	case "":
+		return slices.Contains(legacyRevokedMsgs, e.Msg)
+	}
+	return false
+}
+
 // Permanent diz se reenviar o mesmo corpo não adianta: o servidor recusou o
-// conteúdo. 401 (credencial), 408 e 429 (momentâneos) não entram aqui.
+// conteúdo. Ficam de fora o 401 (credencial, ver Revoked), 408 e 429
+// (momentâneos) e o 413 que não diz ter vindo do servidor (wire.ErrorCodeTooLarge):
+// esse costuma ser o limite de corpo de um proxy, que se corrige sem mexer
+// no snapshot.
 func (e *HTTPError) Permanent() bool {
 	switch e.Status {
 	case http.StatusUnauthorized, http.StatusRequestTimeout, http.StatusTooManyRequests:
 		return false
+	case http.StatusRequestEntityTooLarge:
+		return e.Code == wire.ErrorCodeTooLarge
 	}
 	return e.Status >= 400 && e.Status < 500
 }
@@ -305,7 +335,7 @@ func (c *Client) try(ctx context.Context, method, path string, body []byte, hdr 
 		if json.Unmarshal(b, &e) != nil || e.Error == "" {
 			e.Error = strings.TrimSpace(string(b))
 		}
-		return &HTTPError{Status: resp.StatusCode, Msg: e.Error}
+		return &HTTPError{Status: resp.StatusCode, Msg: e.Error, Code: e.Code}
 	}
 	return json.Unmarshal(b, out)
 }

@@ -155,7 +155,7 @@ server {
 |---|---|
 | `return 301 https://…` no `listen 80` | o painel e o cadastro funcionariam em HTTP, com senha e token em claro; o servidor recusa com 403 o que o proxy disser que chegou por HTTP |
 | `ssl_protocols … TLSv1.3` | o agente não conecta (ele só aceita TLS 1.3) |
-| `client_max_body_size 32m` | o padrão do Nginx é 1 MiB: máquinas com muito software recebem `413`, e o agente desiste daquele inventário (vai para `queue/rejected/`) |
+| `client_max_body_size 32m` | o padrão do Nginx é 1 MiB: máquinas com muito software recebem `413`; o inventário fica na fila do agente e não chega enquanto o limite não subir |
 | `proxy_set_header Host $host` | o painel monta o endereço dos instaladores com o `Host`: sem ele, os pacotes mandariam as máquinas para `127.0.0.1:8080` |
 | `X-Forwarded-For $remote_addr` | os logs e o limite de tentativas de login veriam todo mundo com o IP do proxy |
 | `X-Forwarded-Proto $scheme` | sem problema de segurança, mas o servidor perde a confirmação de que a requisição chegou por HTTPS |
@@ -304,17 +304,26 @@ Qualquer proxy que termine o TLS serve se:
   assinatura só se identificam pelo certificado cliente no TLS, que o proxy não repassa. Eles
   recebem `401`. Atualize o agente antes de pôr o proxy na frente, ou use passthrough.
 - **Proxy que corta corpo grande** (o `client_max_body_size` padrão do Nginx é 1 MiB): `413`. O
-  agente toma a recusa como definitiva e põe aquele inventário em `queue/rejected/`; as máquinas
-  com mais software ficam `sem-coleta` ou `atrasado`.
+  inventário fica na fila do agente, que tenta de novo com espera crescente; as máquinas com mais
+  software ficam `sem-coleta` ou `atrasado` até o limite subir. Como a fila sai do mais antigo
+  para o mais novo, os inventários seguintes esperam atrás dele (a fila guarda até 100). Só o
+  `413` que o próprio servidor marca como seu (corpo acima de 32 MiB) é definitivo e vai para
+  `queue/rejected/`.
 - **Proxy que reescreve o corpo** (alguns WAFs, compressão "otimizada"): `401` "assinatura
   inválida".
 
-Cuidado com o `401`: para o agente, ele quer dizer "este crachá não vale mais". O serviço para
-(código de saída 3) e não reinicia sozinho, como se o agente tivesse sido revogado. Depois de
-corrigir o proxy, reinicie o serviço em cada máquina afetada
+Nenhum desses `401` para o agente. Ele só se dá por revogado quando o servidor diz que recusou o
+crachá em si (agente revogado ou desconhecido, crachá vencido; a resposta traz um código para
+isso). Qualquer outro `401`, do servidor ou de uma página do proxy, é tratado como falha
+passageira: o log diz `envio falhou; snapshot fica na fila` com "não é revogação", os
+inventários esperam na fila, e o envio volta sozinho quando o proxy for corrigido, sem reiniciar
+o serviço nem recadastrar. Uma recusa por relógio errado também não para o agente: ele acerta o
+horário pela resposta do servidor e tenta de novo.
+
+Agentes anteriores a esta regra tomam qualquer `401` por revogação: o serviço para (código de
+saída 3) e não reinicia sozinho. Depois de corrigir o proxy, reinicie o serviço nessas máquinas
 (`systemctl restart invenire-agent` ou `Restart-Service invenire-agent`); não precisa
-recadastrar. Uma recusa por relógio errado não cai aqui: o agente acerta o horário pela resposta
-do servidor e tenta de novo.
+recadastrar. Eles também mandam para `queue/rejected/` o inventário recusado com `413`.
 - **Passthrough com proxy que abre o TLS** (Apache, Cloudflare): não há passthrough; use o modo
   terminando TLS.
 

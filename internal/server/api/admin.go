@@ -144,7 +144,7 @@ type Organization struct {
 }
 
 // ErrAlreadySetUp é a recusa do /setup numa instalação que já tem tenant.
-var ErrAlreadySetUp = &httpError{http.StatusConflict, "esta instalação já foi configurada"}
+var ErrAlreadySetUp = &httpError{status: http.StatusConflict, msg: "esta instalação já foi configurada"}
 
 // CreateOrganization cria o tenant e o primeiro administrador (ator humano
 // com read e admin, e login com e-mail e senha), numa transação só. É a
@@ -556,4 +556,4 @@ func (s *Server) TenantStatus(ctx context.Context, tenant uuid.UUID, stale time.
 }
 
 // BadRequest é um erro 400 com a mensagem para quem pediu.
-func BadRequest(msg string) error { return &httpError{http.StatusBadRequest, msg} }
+func BadRequest(msg string) error { return &httpError{status: http.StatusBadRequest, msg: msg} }

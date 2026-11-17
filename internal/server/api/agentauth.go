@@ -117,13 +117,13 @@ func (s *Server) authSignature(w http.ResponseWriter, r *http.Request, maxBody i
 	}
 
 	if r.ContentLength > maxBody {
-		writeError(w, http.StatusRequestEntityTooLarge, "corpo grande demais")
+		writeErrorCode(w, http.StatusRequestEntityTooLarge, wire.ErrorCodeTooLarge, "corpo grande demais")
 		return nil, false
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
 	var mbe *http.MaxBytesError
 	if errors.As(err, &mbe) {
-		writeError(w, http.StatusRequestEntityTooLarge, "corpo grande demais")
+		writeErrorCode(w, http.StatusRequestEntityTooLarge, wire.ErrorCodeTooLarge, "corpo grande demais")
 		return nil, false
 	}
 	if err != nil {
@@ -145,7 +145,7 @@ func (s *Server) authSignature(w http.ResponseWriter, r *http.Request, maxBody i
 func (s *Server) checkBadge(w http.ResponseWriter, r *http.Request, chain []*x509.Certificate) (store.Agent, bool) {
 	row, err := s.q.GetAgentForAuth(r.Context(), pki.Fingerprint(chain[0].Raw))
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, http.StatusUnauthorized, "agente desconhecido ou revogado")
+		writeErrorCode(w, http.StatusUnauthorized, wire.ErrorCodeAgentRevoked, "agente desconhecido ou revogado")
 		return store.Agent{}, false
 	}
 	if err != nil {
@@ -154,7 +154,7 @@ func (s *Server) checkBadge(w http.ResponseWriter, r *http.Request, chain []*x50
 	}
 	if err := pki.VerifyAgentCert(chain, row.CaCert); err != nil {
 		s.log.WarnContext(r.Context(), "crachá recusado", "agent_id", row.Agent.ID, "remote", r.RemoteAddr, "err", err)
-		writeError(w, http.StatusUnauthorized, "certificado cliente inválido ou vencido")
+		writeErrorCode(w, http.StatusUnauthorized, wire.ErrorCodeBadgeInvalid, "certificado cliente inválido ou vencido")
 		return store.Agent{}, false
 	}
 	return row.Agent, true

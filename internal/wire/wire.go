@@ -68,7 +68,25 @@ type SnapshotResponse struct {
 // Error é o corpo de toda resposta de erro.
 type Error struct {
 	Error string `json:"error"`
+	// Code identifica, para o agente, as recusas que mudam o que ele faz
+	// (ErrorCode*). Vazio nas demais. Uma resposta sem Code pode não ter
+	// vindo do servidor, e sim de um proxy no caminho.
+	Code string `json:"code,omitempty"`
 }
+
+// Códigos de erro que o agente interpreta.
+const (
+	// ErrorCodeAgentRevoked: o crachá não corresponde a nenhum agente ativo
+	// (revogado, ou a máquina foi cadastrada de novo). Só cadastrando de novo.
+	ErrorCodeAgentRevoked = "agent_revoked"
+	// ErrorCodeBadgeInvalid: o crachá é de um agente conhecido, mas venceu ou
+	// não foi emitido pela CA (não revogada) do tenant. Só cadastrando de novo.
+	ErrorCodeBadgeInvalid = "badge_invalid"
+	// ErrorCodeTooLarge: o próprio servidor recusou o corpo pelo tamanho.
+	// Reenviar o mesmo corpo não adianta. Um 413 sem este código é de um
+	// proxy no caminho, e o agente tenta de novo depois.
+	ErrorCodeTooLarge = "too_large"
+)
 
 // AgentInfo é a resposta de GET /v1/agent.
 type AgentInfo struct {

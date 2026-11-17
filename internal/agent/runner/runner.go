@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	mrand "math/rand/v2"
+	"net/http"
 	"net/url"
 	"time"
 
@@ -151,7 +152,7 @@ func SetServer(ctx context.Context, dir state.Dir, opts SetServerOptions) (wire.
 	}
 	info, chain, err := client.Agent(ctx)
 	var he *transport.HTTPError
-	if errors.As(err, &he) && he.Status == 401 {
+	if errors.As(err, &he) && he.Revoked() {
 		return info, errors.New("o servidor novo não reconhece este agente: o tenant dele foi importado lá?")
 	}
 	if err != nil {
@@ -300,6 +301,9 @@ func (a *Agent) Enqueue(ctx context.Context) (string, error) {
 
 // Flush envia a fila do mais antigo para o mais novo e para no primeiro erro
 // momentâneo. Snapshots que o servidor recusa de vez vão para rejected/.
+// Devolve ErrRevoked só quando o servidor recusa o crachá em si
+// (HTTPError.Revoked); outro 401, e o 413 de proxy, são tratados como
+// momentâneos: o snapshot fica na fila.
 func (a *Agent) Flush(ctx context.Context) (sent int, err error) {
 	items, err := a.queue.List()
 	if err != nil {
@@ -318,8 +322,14 @@ func (a *Agent) Flush(ctx context.Context) (sent int, err error) {
 		var he *transport.HTTPError
 		switch {
 		case err == nil:
-		case errors.As(err, &he) && he.Status == 401:
+		case errors.As(err, &he) && he.Revoked():
 			return sent, ErrRevoked
+		case errors.As(err, &he) && he.Status == http.StatusUnauthorized:
+			// O crachá não foi recusado; o mais provável é um proxy no
+			// caminho. O snapshot fica na fila e o envio é tentado de novo.
+			return sent, fmt.Errorf("%w (não é revogação: confira o proxy no caminho, se houver)", err)
+		case errors.As(err, &he) && he.Status == http.StatusRequestEntityTooLarge && !he.Permanent():
+			return sent, fmt.Errorf("%w (limite de corpo de um proxy no caminho? o servidor aceita até 32 MiB)", err)
 		case errors.As(err, &he) && he.Permanent():
 			a.Log.ErrorContext(ctx, "servidor recusou o snapshot", "sha256", it.Sum, "err", err)
 			if err := a.queue.Reject(it, err.Error()); err != nil {

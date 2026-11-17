@@ -162,7 +162,7 @@ func readBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	var mbe *http.MaxBytesError
 	switch {
 	case errors.As(err, &mbe), len(body) > maxSnapshotBody:
-		return nil, errorf(http.StatusRequestEntityTooLarge, "snapshot grande demais")
+		return nil, errorCode(http.StatusRequestEntityTooLarge, wire.ErrorCodeTooLarge, "snapshot grande demais")
 	case err != nil:
 		return nil, errorf(http.StatusBadRequest, "corpo ilegível: %s", err)
 	}

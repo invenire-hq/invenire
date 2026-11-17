@@ -43,9 +43,11 @@ identificador (as duas se revezam no mesmo cadastro, e cada cadastro revoga o an
 | Mensagem (log do agente) | Causa | O que fazer |
 |---|---|---|
 | `collected_at … à frente do servidor` (em `queue/rejected/`) | o relógio da máquina está mais de 24h adiantado | acerte o relógio; a próxima coleta entra |
-| `o servidor recusou o certificado do agente` (serviço parado, saída 3) | agente revogado, máquina cadastrada de novo (cada cadastro revoga o anterior), ou um proxy no caminho respondendo `401` | se foi revogado, cadastre de novo com o instalador e `-Force`/`--force`; se foi o proxy, corrija-o e reinicie o serviço |
+| `o servidor recusou o certificado do agente` (serviço parado, saída 3) | agente revogado, máquina cadastrada de novo (cada cadastro revoga o anterior) ou crachá vencido | cadastre de novo com o instalador e `-Force`/`--force` |
+| `envio falhou; snapshot fica na fila` com `401` e "não é revogação" | um proxy no caminho recusou ou alterou a requisição; o crachá continua valendo | corrija o proxy (tabela abaixo); o agente tenta de novo sozinho |
+| `envio falhou; snapshot fica na fila` com `413` | limite de corpo de um proxy no caminho | aumente o limite (tabela abaixo); o snapshot espera na fila |
 | `envio falhou; snapshot fica na fila` | servidor fora do ar ou fora de alcance | nada a fazer se for passageiro; o agente tenta de novo e a fila guarda até 100 |
-| `servidor recusou o snapshot` (em `queue/rejected/`) | recusa definitiva (4xx), com o motivo no arquivo | veja o motivo; atrás de proxy, veja a tabela abaixo |
+| `servidor recusou o snapshot` (em `queue/rejected/`) | recusa definitiva do servidor (4xx), com o motivo no arquivo | veja o motivo |
 
 ## Proxy reverso
 
@@ -54,7 +56,7 @@ identificador (as duas se revezam no mesmo cadastro, e cada cadastro revoga o an
 | `502 Bad Gateway` | o proxy não alcança o servidor | `docker compose ps`; com o proxy na mesma máquina, `curl http://127.0.0.1:8080/healthz` tem de dar `204` |
 | `403` "… fora de --trusted-proxies" | o proxy conecta de um endereço que o servidor não conhece | ponha o IP do proxy em `INVENIRE_TRUSTED_PROXIES` ([proxy em outra máquina](instalar/proxy-reverso.md#proxy-em-outra-máquina)) |
 | `403` "o proxy recebeu esta requisição por http" | o proxy repassa o que chegou em HTTP | redirecione HTTP para HTTPS no proxy (`return 301`) |
-| `413` / "corpo grande demais" | limite de corpo do proxy abaixo de 32 MiB | `client_max_body_size 32m;` (Nginx) |
+| `413` (página do proxy, "Request Entity Too Large") | limite de corpo do proxy abaixo de 32 MiB | `client_max_body_size 32m;` (Nginx); os snapshots esperam na fila e saem depois |
 | `401` "assinatura inválida" | o proxy alterou o corpo ou o caminho | desligue o que reescreve o corpo; publique na raiz do domínio |
 | `401` "crachá do agente obrigatório" | agente antigo (só mTLS) atrás de proxy que termina TLS | atualize o agente, ou use passthrough |
 | `401` "Invenire-Timestamp fora da janela" | relógio da máquina mais de 24h longe do servidor (o agente já tentou corrigir) | acerte o relógio da máquina e do servidor |

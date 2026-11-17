@@ -148,19 +148,25 @@ func (s *Server) inTx(ctx context.Context, fn func(q *store.Queries) error) erro
 type httpError struct {
 	status int
 	msg    string
+	code   string // wire.ErrorCode*, quando o agente precisa distinguir
 }
 
 func (e *httpError) Error() string { return e.msg }
 
 func errorf(status int, format string, args ...any) error {
-	return &httpError{status, fmt.Sprintf(format, args...)}
+	return &httpError{status: status, msg: fmt.Sprintf(format, args...)}
+}
+
+// errorCode é errorf com um código de erro para o agente (wire.ErrorCode*).
+func errorCode(status int, code, format string, args ...any) error {
+	return &httpError{status: status, msg: fmt.Sprintf(format, args...), code: code}
 }
 
 // fail responde com o status de um httpError, ou 500 para qualquer outro erro.
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var he *httpError
 	if errors.As(err, &he) {
-		writeError(w, he.status, he.msg)
+		writeJSON(w, he.status, wire.Error{Error: he.msg, Code: he.code})
 		return
 	}
 	s.internalError(w, r, err)
@@ -179,4 +185,10 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, wire.Error{Error: msg})
+}
+
+// writeErrorCode é writeError com um código de erro para o agente
+// (wire.ErrorCode*).
+func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, wire.Error{Error: msg, Code: code})
 }

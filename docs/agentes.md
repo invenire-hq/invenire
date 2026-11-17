@@ -198,8 +198,10 @@ Administradores; no Linux, 0700.
 
 **Fila.** Guarda até 100 snapshots (`--max-queue`) com os bytes exatos que serão enviados; o
 nome de cada arquivo traz o SHA-256, conferido antes do envio. O que o servidor recusa de vez vai
-para `queue/rejected/` com o motivo. Se o crachá for revogado, `run` para com o código de saída 3
-e a fila fica intacta.
+para `queue/rejected/` com o motivo. Se o servidor recusar o crachá em si (agente revogado ou
+desconhecido, crachá vencido), `run` para com o código de saída 3 e a fila fica intacta. Outro
+`401`, e um `413` que não venha do próprio servidor, costumam ser de um proxy no caminho: o
+snapshot fica na fila e o agente tenta de novo, com espera crescente.
 
 **Autenticação.** O agente apresenta o crachá no TLS (mTLS) e, além disso, assina toda
 requisição com a chave dele (`Invenire-Agent-Cert`, `Invenire-Timestamp`,
