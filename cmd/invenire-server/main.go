@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Comando invenire-server é a API central do Invenire.
 //
 //	invenire-server serve
@@ -39,15 +41,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/athosbes/invenire/internal/server/api"
-	"github.com/athosbes/invenire/internal/server/download"
-	"github.com/athosbes/invenire/internal/server/export"
-	"github.com/athosbes/invenire/internal/server/ingest"
-	"github.com/athosbes/invenire/internal/server/normalize"
-	"github.com/athosbes/invenire/internal/server/pki"
-	"github.com/athosbes/invenire/internal/server/store"
-	"github.com/athosbes/invenire/internal/server/web"
-	"github.com/athosbes/invenire/migrations"
+	"github.com/invenire-hq/invenire/internal/server/api"
+	"github.com/invenire-hq/invenire/internal/server/download"
+	"github.com/invenire-hq/invenire/internal/server/export"
+	"github.com/invenire-hq/invenire/internal/server/ingest"
+	"github.com/invenire-hq/invenire/internal/server/normalize"
+	"github.com/invenire-hq/invenire/internal/server/pki"
+	"github.com/invenire-hq/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/server/web"
+	"github.com/invenire-hq/invenire/migrations"
 )
 
 // version é preenchida no build: -ldflags "-X main.version=0.1.0".

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package api_test
 
 import (
@@ -13,11 +15,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/athosbes/invenire/internal/server/api"
-	"github.com/athosbes/invenire/internal/server/ingest"
-	"github.com/athosbes/invenire/internal/server/normalize"
-	"github.com/athosbes/invenire/internal/server/store"
-	"github.com/athosbes/invenire/pkg/snapshot"
+	"github.com/invenire-hq/invenire/internal/server/api"
+	"github.com/invenire-hq/invenire/internal/server/ingest"
+	"github.com/invenire-hq/invenire/internal/server/normalize"
+	"github.com/invenire-hq/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/pkg/snapshot"
 )
 
 // user cria um ator com os escopos e devolve o token de API dele.

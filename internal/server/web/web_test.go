@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package web_test
 
 import (
@@ -26,14 +28,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/athosbes/invenire/internal/server/api"
-	"github.com/athosbes/invenire/internal/server/download"
-	"github.com/athosbes/invenire/internal/server/pki"
-	"github.com/athosbes/invenire/internal/server/store"
-	"github.com/athosbes/invenire/internal/server/web"
-	"github.com/athosbes/invenire/internal/testdb"
-	"github.com/athosbes/invenire/internal/wire"
-	"github.com/athosbes/invenire/pkg/snapshot"
+	"github.com/invenire-hq/invenire/internal/server/api"
+	"github.com/invenire-hq/invenire/internal/server/download"
+	"github.com/invenire-hq/invenire/internal/server/pki"
+	"github.com/invenire-hq/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/server/web"
+	"github.com/invenire-hq/invenire/internal/testdb"
+	"github.com/invenire-hq/invenire/internal/wire"
+	"github.com/invenire-hq/invenire/pkg/snapshot"
 )
 
 const setupCode = "ABCD-EFGH-JKLM"

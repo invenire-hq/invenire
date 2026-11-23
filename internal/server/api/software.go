@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package api
 
 import (
@@ -14,9 +16,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/athosbes/invenire/internal/server/ingest"
-	"github.com/athosbes/invenire/internal/server/normalize"
-	"github.com/athosbes/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/server/ingest"
+	"github.com/invenire-hq/invenire/internal/server/normalize"
+	"github.com/invenire-hq/invenire/internal/server/store"
 )
 
 // UnmappedList é a resposta de GET /v1/software/unmapped.

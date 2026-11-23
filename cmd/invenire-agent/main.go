@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Comando invenire-agent inventaria a máquina local.
 //
 //	invenire-agent enroll --server https://invenire:8443 --token inv_… --ca-pin sha256:…
@@ -17,11 +19,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/athosbes/invenire/internal/agent/collect"
-	"github.com/athosbes/invenire/internal/agent/runner"
-	"github.com/athosbes/invenire/internal/agent/state"
-	"github.com/athosbes/invenire/internal/agent/transport"
-	"github.com/athosbes/invenire/pkg/snapshot"
+	"github.com/invenire-hq/invenire/internal/agent/collect"
+	"github.com/invenire-hq/invenire/internal/agent/runner"
+	"github.com/invenire-hq/invenire/internal/agent/state"
+	"github.com/invenire-hq/invenire/internal/agent/transport"
+	"github.com/invenire-hq/invenire/pkg/snapshot"
 )
 
 // version é preenchida no build: -ldflags "-X main.version=0.1.0".

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package main
 
 import (
@@ -15,7 +17,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/athosbes/invenire/internal/agent/state"
+	"github.com/invenire-hq/invenire/internal/agent/state"
 )
 
 // serviceName é o nome do serviço do Windows, da origem no Event Log e da

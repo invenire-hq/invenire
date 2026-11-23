@@ -92,8 +92,13 @@ cd /opt/invenire
 sudo git pull
 cd deploy/servidor
 sudo ./backup.sh /var/backups/invenire
-sudo docker compose up -d --build --wait
+sudo docker compose pull
+sudo docker compose up -d --wait
 ```
+
+Com `INVENIRE_VERSION` fixa no `.env`, mude-a para a versão nova antes do `pull` (as versões
+estão no [CHANGELOG](../CHANGELOG.md) e nas releases do repositório). Quem monta a imagem
+a partir do código troca o `pull` por `up -d --build --wait`.
 
 O servidor aplica as migrações do banco ao subir. A imagem nova traz também o agente novo: as
 máquinas o recebem quando o instalador roda de novo ([agentes.md](agentes.md#atualizar)).

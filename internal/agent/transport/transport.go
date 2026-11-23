@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package transport fala HTTP com o invenire-server: o cadastro, com a CA
 // conferida por pin, e o envio de snapshots com gzip.
 //
@@ -32,7 +34,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/athosbes/invenire/internal/wire"
+	"github.com/invenire-hq/invenire/internal/wire"
 )
 
 // HTTPError é uma resposta de erro do servidor, ou de um proxy no caminho.

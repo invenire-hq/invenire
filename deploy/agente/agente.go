@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package agente embute os scripts de instalação do agente no servidor, que
 // os entrega no pacote pré-configurado e no comando de uma linha (como o
 // pacote migrations faz com as migrações).

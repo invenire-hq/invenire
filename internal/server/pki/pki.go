@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package pki tem as CAs do Invenire.
 //
 // A CA da instalação fica em disco, no diretório de dados do servidor, e

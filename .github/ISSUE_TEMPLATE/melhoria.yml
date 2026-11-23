@@ -1,0 +1,40 @@
+name: Pedido de melhoria
+description: Uma ideia, algo que falta ou que poderia ser mais simples.
+labels: ["melhoria"]
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: Qual problema isso resolve
+      description: O que você tenta fazer hoje e onde esbarra. Contar o caso real ajuda mais que a solução.
+    validations:
+      required: true
+  - type: textarea
+    id: proposta
+    attributes:
+      label: O que você propõe
+      description: Como imagina que funcionaria (tela, comando, opção, documentação…).
+    validations:
+      required: true
+  - type: textarea
+    id: alternativas
+    attributes:
+      label: Alternativas
+      description: Outras formas de resolver, ou como você contorna hoje.
+  - type: dropdown
+    id: parte
+    attributes:
+      label: Parte do Invenire
+      multiple: true
+      options:
+        - Agente
+        - Servidor / API
+        - Painel web
+        - Instalação / implantação
+        - Documentação
+  - type: checkboxes
+    id: contribuir
+    attributes:
+      label: Contribuição
+      options:
+        - label: Posso ajudar a implementar (veja o CONTRIBUTING.md e o termo de contribuição).

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package api_test
 
 import (
@@ -6,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/athosbes/invenire/internal/server/api"
-	"github.com/athosbes/invenire/internal/server/store"
-	"github.com/athosbes/invenire/pkg/snapshot"
+	"github.com/invenire-hq/invenire/internal/server/api"
+	"github.com/invenire-hq/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/pkg/snapshot"
 )
 
 func TestMultiUseToken(t *testing.T) {

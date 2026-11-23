@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package state guarda o que o agente precisa entre execuções: a chave e o
 // certificado do cadastro, a CA do servidor, o endereço do servidor e o hash
 // do último snapshot gerado (para o prev_sha256 do próximo).

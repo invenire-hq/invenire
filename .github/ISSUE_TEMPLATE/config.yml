@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Falha de segurança
+    url: https://github.com/invenire-hq/invenire/security/advisories/new
+    about: Relate em particular, sem abrir issue público (veja o SECURITY.md).
+  - name: Documentação
+    url: https://github.com/invenire-hq/invenire/tree/main/docs
+    about: Instalação, operação, problemas comuns e segurança.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package web
 
 import (
@@ -13,10 +15,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/athosbes/invenire/internal/server/api"
-	"github.com/athosbes/invenire/internal/server/export"
-	"github.com/athosbes/invenire/internal/server/password"
-	"github.com/athosbes/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/server/api"
+	"github.com/invenire-hq/invenire/internal/server/export"
+	"github.com/invenire-hq/invenire/internal/server/password"
+	"github.com/invenire-hq/invenire/internal/server/store"
 )
 
 func pathUUID(r *http.Request) (uuid.UUID, bool) {

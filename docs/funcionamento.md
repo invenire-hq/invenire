@@ -2,9 +2,7 @@
 
 São três programas: o **PostgreSQL**; o **servidor** (`invenire-server`), que recebe, organiza e
 mostra os inventários (API em `/v1` e painel web na mesma porta); e o **agente**
-(`invenire-agent`), instalado em cada máquina. A arquitetura e o modelo de dados estão no
-documento
-[Invenire — Arquitetura e Modelo de Dados](https://claude.ai/artifact/WfzRB6TWaCNPQxdpx9QJtc).
+(`invenire-agent`), instalado em cada máquina.
 
 ## Organizações, unidades e etiquetas
 

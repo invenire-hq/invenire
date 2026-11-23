@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package api
 
 import (
@@ -7,8 +9,8 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/athosbes/invenire/internal/server/export"
-	"github.com/athosbes/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/server/export"
+	"github.com/invenire-hq/invenire/internal/server/store"
 )
 
 // ExportKeyHeader traz a chave de exportação quando o pacote inclui a chave

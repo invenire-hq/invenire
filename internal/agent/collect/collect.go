@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package collect monta o snapshot da máquina local a partir do pkg/sysinfo.
 // Cada coletor roda de forma independente: se um falha, o erro vai para
 // collector_errors e o snapshot segue com o restante.
@@ -11,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/athosbes/invenire/pkg/snapshot"
-	"github.com/athosbes/invenire/pkg/sysinfo"
+	"github.com/invenire-hq/invenire/pkg/snapshot"
+	"github.com/invenire-hq/invenire/pkg/sysinfo"
 )
 
 type collector struct {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package normalize reconhece produtos nos nomes brutos de software.
 //
 // Três regras, nesta ordem:

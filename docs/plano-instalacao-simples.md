@@ -1,7 +1,8 @@
 # Plano: instalação simples, painel web e documentação para código aberto
 
 Plano para outra sessão implementar. Escrito em 2026-11-12, sobre o commit `c7ca30d`
-(pacote do piloto pronto). Nada aqui foi implementado ainda.
+(pacote do piloto pronto). As cinco fases foram implementadas; o estado de cada uma, com o que
+ainda não foi testado de verdade, está em [Estado das fases](#estado-das-fases).
 
 ## Objetivo
 
@@ -20,7 +21,9 @@ vai ser aberto, então nomes, exemplos e documentação precisam servir a qualqu
 | Assistente interativo do servidor | **Não.** Servidor é para técnico; basta documentar bem |
 | Proxy do teste na instituição | **Nginx simples**, terminando TLS. Os outros cenários precisam ao menos estar explicados (compatível ou não, e por quê) |
 | Servidor hospedado | Documentar VPS agora. Um serviço pago com autocadastro vem depois: **não construir, mas não fechar a porta** |
-| Licença | **Pendente.** Não criar `LICENSE` até o Athos decidir |
+| Licença | **AGPL-3.0** (decidido em 2026-11-17), `AGPL-3.0-only` nos cabeçalhos SPDX. Contribuições sob CLA + DCO, para manter serviço hospedado e licença comercial possíveis |
+| Onde o código fica | Organização **`invenire-hq`** no GitHub: `github.com/invenire-hq/invenire`, imagem `ghcr.io/invenire-hq/invenire-server` |
+| Autenticação do agente atrás de proxy | **Assinatura de requisição** (abordagem da Fase 1), confirmada |
 
 ## Estado atual que motiva o plano
 
@@ -235,7 +238,17 @@ só com o que está escrito; o do Nginx foi feito com um Nginx de verdade.
 - `CONTRIBUTING.md`, `SECURITY.md` (como relatar falha), `CHANGELOG.md`, modelos de issue
   (os campos de "O que anotar" do piloto: hostname, sistema, versão do agente, o que houve).
 - Revisar o repositório atrás de nomes, endereços e segredos reais antes de publicar.
-- `LICENSE`: **esperar a decisão do Athos.**
+- `LICENSE`: AGPL-3.0 (decidido).
+
+**Feito:** `LICENSE` (texto oficial da AGPL-3.0), SPDX `AGPL-3.0-only` nos `.go` (menos o código
+gerado pelo sqlc); módulo `github.com/invenire-hq/invenire`; compose com a imagem
+`ghcr.io/invenire-hq/invenire-server` e `build:` como alternativa; `.github/workflows/ci.yml` e
+`release.yml` (actions fixadas por SHA, permissões por job, imagem multi-arquitetura por
+compilação cruzada, sem QEMU); `CONTRIBUTING.md`, `CLA.md`, `SECURITY.md`, `CHANGELOG.md`
+(0.1.0), modelos de issue e de pull request. Na revisão, a árvore perdeu o link para o documento
+de arquitetura privado (claude.ai) e um nome real num teste; o histórico do git não foi
+reescrito (achados no relatório da Fase 5: e-mail pessoal nos commits, o mesmo link privado,
+exemplos antigos com "Prefeitura").
 
 ## Ordem e dependências
 
@@ -246,13 +259,33 @@ ser feitos junto com a Fase 1. Um commit (ou PR) por fase, com os testes da fase
 
 ## Pendências para o Athos
 
-1. **Licença** (AGPL-3.0, Apache-2.0 ou MIT). Só bloqueia a Fase 5.
-2. **Onde o código vai ficar** (ex.: `github.com/athosbes/invenire`): define o nome da imagem
-   no GHCR e os links da documentação.
+1. ~~**Licença**~~ — **resolvida:** AGPL-3.0 (`LICENSE`, cabeçalho SPDX nos `.go`).
+2. ~~**Onde o código vai ficar**~~ — **resolvida:** organização `invenire-hq`
+   (`github.com/invenire-hq/invenire`, imagem `ghcr.io/invenire-hq/invenire-server`).
 3. **Domínio do teste na instituição** e se o Nginx de lá já tem certificado público.
-4. **Confirmar a abordagem da Fase 1** (assinatura de requisição). A alternativa menor é o
-   Nginx repassar o certificado num cabeçalho: menos código, mas exige configuração específica
-   por proxy, não funciona com Cloudflare e faz o navegador pedir certificado no painel.
+4. ~~**Confirmar a abordagem da Fase 1**~~ — **resolvida:** assinatura de requisição, mantida.
+5. ~~**Cabeçalho SPDX**~~ — **resolvida:** `AGPL-3.0-only`.
+6. ~~**Termo de contribuição**~~ — **resolvida:** CLA **e** DCO. O DCO (`git commit -s`) atesta a
+   origem de cada commit, conferido no CI; o CLA (`CLA.md`), aceito uma vez no pull request, dá
+   o direito de relicenciar. O texto do CLA merece a leitura de um advogado antes do primeiro
+   pull request de fora.
+7. ~~**Organização e repositório**~~ — **criados:** `https://github.com/invenire-hq/invenire`
+   (público, vazio em 2026-11-23). Falta, no GitHub: ativar o relatório privado de
+   vulnerabilidade (Settings > Security) e, depois da primeira tag, conferir se o pacote da
+   imagem no GHCR ficou público.
+8. **Histórico do git**, publicado como está (sem reescrita): o e-mail do autor aparece nos
+   commits e há um link para um documento privado do claude.ai em commits antigos. A árvore
+   atual não tem nenhum dos dois.
+
+## Estado das fases
+
+| Fase | Estado | Ainda não testado de verdade |
+|---|---|---|
+| 1 — Servidor atrás de proxy | Feita (`448c4a0`) | — |
+| 2 — Painel web | Feita (`a32e08a`) | painel num navegador de verdade (testado por HTTP) |
+| 3 — Instalador pré-configurado | Feita (`4a6742c`, `bc4c2d8`) | Windows: segunda execução elevada do `Instalar.cmd`, comando de uma linha no PowerShell, SmartScreen |
+| 4 — Implantação e documentação | Feita (`b7dbe10`) | certbot e Let's Encrypt reais; linhas da matriz de proxies além de Nginx e Caddy |
+| 5 — Abrir o código | Feita na pasta de trabalho | workflows no GitHub de verdade (só validados localmente), publicação no GHCR, release |
 
 ## Futuro (registrado, fora deste plano)
 

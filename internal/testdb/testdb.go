@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package testdb dá aos testes um PostgreSQL de verdade com as migrações
 // aplicadas, num schema próprio que é apagado no fim. Sem a variável
 // INVENIRE_TEST_DATABASE_URL os testes que o usam são pulados.
@@ -14,7 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/athosbes/invenire/migrations"
+	"github.com/invenire-hq/invenire/migrations"
 )
 
 // New devolve um pool ligado a um schema novo, já migrado.

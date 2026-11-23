@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Comando schemagen gera o JSON Schema do snapshot a partir das structs Go.
 // Rode com `go generate ./pkg/snapshot`.
 package main
@@ -10,7 +12,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 
-	"github.com/athosbes/invenire/pkg/snapshot"
+	"github.com/invenire-hq/invenire/pkg/snapshot"
 )
 
 func generate() ([]byte, error) {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package wire tem os corpos e cabeçalhos HTTP trocados entre o agente e o
 // servidor. Fica fora de internal/server/api para o agente não carregar as
 // dependências do servidor (pgx, goose, validador de schema).
@@ -6,7 +8,7 @@ package wire
 import (
 	"github.com/google/uuid"
 
-	"github.com/athosbes/invenire/pkg/snapshot"
+	"github.com/invenire-hq/invenire/pkg/snapshot"
 )
 
 // Rotas.

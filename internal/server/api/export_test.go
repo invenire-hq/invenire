@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package api_test
 
 import (
@@ -13,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/athosbes/invenire/internal/server/api"
-	"github.com/athosbes/invenire/internal/server/export"
-	"github.com/athosbes/invenire/internal/server/ingest"
-	"github.com/athosbes/invenire/internal/server/normalize"
-	"github.com/athosbes/invenire/pkg/snapshot"
+	"github.com/invenire-hq/invenire/internal/server/api"
+	"github.com/invenire-hq/invenire/internal/server/export"
+	"github.com/invenire-hq/invenire/internal/server/ingest"
+	"github.com/invenire-hq/invenire/internal/server/normalize"
+	"github.com/invenire-hq/invenire/pkg/snapshot"
 )
 
 // download faz GET e devolve status, corpo e cabeçalhos.

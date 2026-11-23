@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package ingest aplica os snapshots recebidos ao estado do inventário.
 //
 // O snapshot é imutável e a ingestão só lê dele. Para cada snapshot pendente,
@@ -30,9 +32,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/athosbes/invenire/internal/server/normalize"
-	"github.com/athosbes/invenire/internal/server/store"
-	"github.com/athosbes/invenire/pkg/snapshot"
+	"github.com/invenire-hq/invenire/internal/server/normalize"
+	"github.com/invenire-hq/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/pkg/snapshot"
 )
 
 // Normalizer reconhece produtos em nomes brutos. Só deve devolver ok para

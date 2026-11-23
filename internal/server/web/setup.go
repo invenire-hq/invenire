@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package web
 
 import (
@@ -6,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/athosbes/invenire/internal/server/api"
+	"github.com/invenire-hq/invenire/internal/server/api"
 )
 
 // A primeira configuração: numa instalação sem tenant, / leva a /setup, que

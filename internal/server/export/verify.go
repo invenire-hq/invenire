@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package export
 
 import (
@@ -19,7 +21,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/athosbes/invenire/internal/server/pki"
+	"github.com/invenire-hq/invenire/internal/server/pki"
 )
 
 // Report é o resultado da conferência de um pacote.

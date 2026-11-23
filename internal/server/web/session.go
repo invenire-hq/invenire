@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package web
 
 import (
@@ -15,9 +17,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/athosbes/invenire/internal/server/api"
-	"github.com/athosbes/invenire/internal/server/password"
-	"github.com/athosbes/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/server/api"
+	"github.com/invenire-hq/invenire/internal/server/password"
+	"github.com/invenire-hq/invenire/internal/server/store"
 )
 
 const (

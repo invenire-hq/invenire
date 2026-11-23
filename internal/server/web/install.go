@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package web
 
 import (
@@ -9,9 +11,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/athosbes/invenire/internal/server/api"
-	"github.com/athosbes/invenire/internal/server/download"
-	"github.com/athosbes/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/server/api"
+	"github.com/invenire-hq/invenire/internal/server/download"
+	"github.com/invenire-hq/invenire/internal/server/store"
 )
 
 // O instalador pré-configurado do agente (Fase 3), na tela do token recém-

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package password guarda e confere senhas de login do painel com argon2id.
 //
 // O hash fica no formato PHC ($argon2id$v=19$m=65536,t=3,p=2$sal$hash), com

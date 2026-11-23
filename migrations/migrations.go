@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package migrations embute as migrações goose, para o servidor aplicá-las
 // na subida sem depender de arquivos no disco.
 package migrations

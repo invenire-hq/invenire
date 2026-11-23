@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package api_test
 
 import (
@@ -22,13 +24,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/athosbes/invenire/internal/agent/transport"
-	"github.com/athosbes/invenire/internal/server/api"
-	"github.com/athosbes/invenire/internal/server/pki"
-	"github.com/athosbes/invenire/internal/server/store"
-	"github.com/athosbes/invenire/internal/testdb"
-	"github.com/athosbes/invenire/internal/wire"
-	"github.com/athosbes/invenire/pkg/snapshot"
+	"github.com/invenire-hq/invenire/internal/agent/transport"
+	"github.com/invenire-hq/invenire/internal/server/api"
+	"github.com/invenire-hq/invenire/internal/server/pki"
+	"github.com/invenire-hq/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/testdb"
+	"github.com/invenire-hq/invenire/internal/wire"
+	"github.com/invenire-hq/invenire/pkg/snapshot"
 )
 
 // proxyEnv é o servidor no modo --behind-proxy (HTTP puro) com um proxy

@@ -5,7 +5,7 @@
 # docs/instalar/proxy-reverso.md.
 #
 #   cp .env.example .env    # e preencha (COMPOSE_FILE=compose.proxy.yml)
-#   docker compose up -d --build --wait
+#   docker compose up -d --wait   # --build para montar a imagem daqui
 #   docker compose logs server | grep "primeira configuração"
 #
 # O agente cadastra pela URL pública, sem pin (o certificado é público).
@@ -28,9 +28,9 @@ services:
       retries: 30
 
   server:
-    # Ainda não há imagem publicada: --build monta a imagem a partir deste
-    # repositório. Com uma imagem pronta, aponte INVENIRE_IMAGE para ela.
-    image: ${INVENIRE_IMAGE:-invenire-server:dev}
+    # Imagem publicada a cada versão (amd64 e arm64). "docker compose up
+    # --build" monta a imagem a partir deste repositório, com o mesmo nome.
+    image: ${INVENIRE_IMAGE:-ghcr.io/invenire-hq/invenire-server}:${INVENIRE_VERSION:-latest}
     build:
       context: ../..
       args:

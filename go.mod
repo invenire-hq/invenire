@@ -1,4 +1,4 @@
-module github.com/athosbes/invenire
+module github.com/invenire-hq/invenire
 
 go 1.26.1
 

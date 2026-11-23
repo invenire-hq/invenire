@@ -31,12 +31,9 @@ Tem de mostrar o IP da VPS. Se acabou de criar o registro, pode levar alguns min
 ## 1. Baixar o Invenire
 
 ```sh
-sudo git clone <endereço do repositório> /opt/invenire
+sudo git clone https://github.com/invenire-hq/invenire.git /opt/invenire
 cd /opt/invenire/deploy/servidor
 ```
-
-> O endereço público do repositório ainda vai ser definido. Enquanto isso, copie a pasta do
-> repositório para `/opt/invenire` como preferir.
 
 ## 2. Configurar
 
@@ -59,11 +56,11 @@ INVENIRE_DOMAIN=invenire.exemplo.org
 ## 3. Subir
 
 ```sh
-sudo docker compose up -d --build --wait
+sudo docker compose up -d --wait
 ```
 
-A primeira vez monta a imagem (alguns minutos). PostgreSQL, servidor e Caddy voltam sozinhos
-quando a VPS reinicia.
+A primeira vez baixa as imagens (`--build` monta a do servidor a partir do código).
+PostgreSQL, servidor e Caddy voltam sozinhos quando a VPS reinicia.
 
 **Conferir.** `sudo docker compose ps` mostra os três serviços de pé (`postgres` e `server`
 como `healthy`). O Caddy tira o certificado logo depois de subir:

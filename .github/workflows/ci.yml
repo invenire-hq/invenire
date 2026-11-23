@@ -1,0 +1,116 @@
+# Testes a cada push e pull request: formatação, go vet (Linux e Windows),
+# código gerado do sqlc em dia, go test com PostgreSQL e a imagem Docker
+# montando. O release.yml chama este mesmo workflow antes de publicar.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # DCO: todo commit de um pull request precisa da linha Signed-off-by
+  # (git commit -s). O aceite do CLA é conferido pelo mantenedor no próprio
+  # pull request. Veja CONTRIBUTING.md.
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Signed-off-by em todo commit
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          faltando=0
+          for c in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            autor=$(git log -1 --format='%an <%ae>' "$c")
+            if ! git log -1 --format='%(trailers:key=Signed-off-by,valueonly)' "$c" | grep -qF "$autor"; then
+              echo "::error::commit $(git log -1 --format='%h %s' "$c") sem 'Signed-off-by: $autor'"
+              faltando=1
+            fi
+          done
+          if [ "$faltando" = 1 ]; then
+            echo "Assine os commits: git rebase --signoff $BASE && git push --force (veja CONTRIBUTING.md)."
+            exit 1
+          fi
+
+  testes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: invenire
+          POSTGRES_PASSWORD: invenire
+          POSTGRES_DB: invenire
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U invenire -d invenire"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      INVENIRE_TEST_DATABASE_URL: postgres://invenire:invenire@localhost:5432/invenire?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          naoformatados=$(gofmt -l .)
+          if [ -n "$naoformatados" ]; then
+            echo "Arquivos fora do gofmt (rode gofmt -w):"
+            echo "$naoformatados"
+            exit 1
+          fi
+
+      - name: go vet (linux)
+        run: go vet ./...
+
+      - name: go vet (windows)
+        run: GOOS=windows go vet ./...
+
+      - name: código do sqlc em dia
+        run: docker run --rm -v "$PWD:/src" -w /src sqlc/sqlc:1.30.0 diff
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test -count=1 ./...
+
+  imagem:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: docker build (amd64, sem publicar)
+        run: docker build --build-arg VERSION=ci -t invenire-server:ci .
+
+      - name: a imagem responde
+        run: docker run --rm invenire-server:ci version

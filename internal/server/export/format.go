@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package export lê e escreve o pacote de exportação de um tenant: o
 // "git clone" do Invenire.
 //

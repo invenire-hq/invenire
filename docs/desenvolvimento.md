@@ -124,6 +124,39 @@ A imagem Docker do servidor (que já leva os executáveis do agente):
 docker build --build-arg VERSION=0.1.0 -t invenire-server:0.1.0 .
 ```
 
+## Integração contínua e publicação
+
+No GitHub Actions (`.github/workflows/`):
+
+- **`ci.yml`**, a cada push e pull request: `gofmt`, `go vet` (Linux e Windows), código do sqlc
+  em dia (`sqlc diff`), `go build`, `go test ./...` com um PostgreSQL de serviço, e a imagem
+  Docker montando.
+- **`release.yml`**, a cada tag `v*`: roda o `ci.yml`; monta os executáveis com
+  `scripts/build.sh` e os anexa à release do GitHub com o `SHA256SUMS`, usando como notas a seção
+  da versão no `CHANGELOG.md`; e publica `ghcr.io/invenire-hq/invenire-server` para
+  `linux/amd64` e `linux/arm64`, com as etiquetas `X.Y.Z`, `X.Y` e `latest` (esta só em versão
+  final; `v0.2.0-rc.1` sai como pré-lançamento).
+
+Para lançar uma versão:
+
+1. No `CHANGELOG.md`, renomeie "Não lançado" para `## [X.Y.Z]`, abra um "Não lançado" vazio
+   acima e acerte os links do fim.
+2. Commit, tag anotada e push da tag:
+
+   ```sh
+   git tag -a v0.1.0 -m "Invenire 0.1.0"
+   git push origin v0.1.0
+   ```
+
+As actions estão fixadas por SHA (com a versão no comentário). Para atualizar uma, troque o SHA
+pelo da tag nova (`git ls-remote https://github.com/<dono>/<action> refs/tags/<versão>`).
+
+Para conferir os workflows sem o GitHub:
+
+```sh
+docker run --rm -v ":/repo" -w /repo rhysd/actionlint:1.7.7
+```
+
 ## Catálogo de software
 
 Para acrescentar um produto ao catálogo de normalização, inclua uma entrada em

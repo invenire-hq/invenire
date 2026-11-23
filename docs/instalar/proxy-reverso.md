@@ -25,12 +25,9 @@ Não é o seu caso? Veja [qual cenário escolher](escolha.md).
 ## 1. Baixar o Invenire
 
 ```sh
-sudo git clone <endereço do repositório> /opt/invenire
+sudo git clone https://github.com/invenire-hq/invenire.git /opt/invenire
 cd /opt/invenire/deploy/servidor
 ```
-
-> O endereço público do repositório ainda vai ser definido. Enquanto isso, copie a pasta do
-> repositório para `/opt/invenire` como preferir.
 
 ## 2. Configurar
 
@@ -54,11 +51,11 @@ chega por essa porta é tratado como vindo do proxy. Com o proxy **em outra máq
 ## 3. Subir o servidor
 
 ```sh
-sudo docker compose up -d --build --wait
+sudo docker compose up -d --wait
 ```
 
-A primeira vez monta a imagem (alguns minutos). O PostgreSQL e o servidor voltam sozinhos
-quando a máquina reinicia.
+A primeira vez baixa as imagens (`--build` monta a do servidor a partir do código). O
+PostgreSQL e o servidor voltam sozinhos quando a máquina reinicia.
 
 **Conferir.** Os dois serviços aparecem `healthy` em `sudo docker compose ps`, e:
 

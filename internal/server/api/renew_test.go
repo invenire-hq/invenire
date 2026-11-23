@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package api_test
 
 import (
@@ -13,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/athosbes/invenire/internal/server/store"
-	"github.com/athosbes/invenire/internal/wire"
-	"github.com/athosbes/invenire/pkg/snapshot"
+	"github.com/invenire-hq/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/wire"
+	"github.com/invenire-hq/invenire/pkg/snapshot"
 )
 
 // Um snapshot datado do futuro travaria o ativo: todos os seguintes chegariam

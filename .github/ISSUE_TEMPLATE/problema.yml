@@ -1,0 +1,78 @@
+name: Relato de problema
+description: Algo não funciona como deveria (agente, servidor, painel ou instalação).
+labels: ["problema"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por relatar. **Falha de segurança não vai aqui**: veja o SECURITY.md.
+        Não cole tokens (`inv_…`, `inva_…`), senhas, chaves nem dados reais que não possam ser
+        públicos; troque por exemplos.
+  - type: input
+    id: hostname
+    attributes:
+      label: Hostname da máquina
+      description: A máquina onde o problema aparece (ou "servidor", se for no servidor).
+      placeholder: ex.: FIN-PC-07
+    validations:
+      required: true
+  - type: input
+    id: sistema
+    attributes:
+      label: Sistema
+      description: Sistema operacional e versão da máquina.
+      placeholder: ex.: Windows 11 Pro 23H2, Ubuntu 24.04, Debian 12 (arm64)
+    validations:
+      required: true
+  - type: input
+    id: versao-agente
+    attributes:
+      label: Versão do agente
+      description: Saída de `invenire-agent version` (ou "não instalado").
+      placeholder: ex.: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: versao-servidor
+    attributes:
+      label: Versão do servidor
+      description: Saída de `invenire-server version` (ou a etiqueta da imagem).
+      placeholder: ex.: 0.1.0
+  - type: dropdown
+    id: cenario
+    attributes:
+      label: Cenário de instalação do servidor
+      options:
+        - Rede local (compose.yml, porta 8443)
+        - VPS com Caddy (compose.caddy.yml)
+        - Atrás de um proxy que já existe (compose.proxy.yml)
+        - Fora do Docker / desenvolvimento
+        - Não sei
+  - type: input
+    id: proxy
+    attributes:
+      label: Proxy, antivírus ou firewall no caminho
+      description: Se houver (Nginx, Traefik, Cloudflare, antivírus que bloqueia…).
+  - type: textarea
+    id: aconteceu
+    attributes:
+      label: O que aconteceu
+      description: O que você fez, o que esperava e o que aconteceu de fato.
+    validations:
+      required: true
+  - type: textarea
+    id: estado
+    attributes:
+      label: Estado da máquina no painel ou no status
+      description: |
+        Ex.: `em-dia`, `na-fila`, `sem-coleta`, `atrasado`, `erro`, `sem-agente`. A saída de
+        `invenire-server status --tenant "…"` ajuda.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Do agente (Visualizador de Eventos > Aplicativo, origem `invenire-agent`, no Windows;
+        `journalctl -u invenire-agent` no Linux)
+        e do servidor (`docker compose logs server`). Corte o que não for do problema.
+      render: text

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package sysinfo lê o estado de baixo nível da máquina local: identificação
 // do hardware (SMBIOS), machine-id, sistema operacional e software instalado.
 //

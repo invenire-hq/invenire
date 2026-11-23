@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package queue é a fila local de snapshots em disco. Cada snapshot é um
 // arquivo com os bytes exatos que serão enviados, nomeado pelo instante da
 // coleta e pelo SHA-256, para a ordem e a integridade virem do próprio nome.
@@ -14,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/athosbes/invenire/internal/agent/state"
+	"github.com/invenire-hq/invenire/internal/agent/state"
 )
 
 const (

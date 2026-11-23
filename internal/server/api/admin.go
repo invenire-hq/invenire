@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package api
 
 import (
@@ -18,8 +20,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/athosbes/invenire/internal/server/password"
-	"github.com/athosbes/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/server/password"
+	"github.com/invenire-hq/invenire/internal/server/store"
 )
 
 // Ações de administração que não têm rota /v1, mas que o painel e a linha de

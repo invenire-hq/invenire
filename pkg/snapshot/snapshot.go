@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package snapshot define o formato do inventário que o agente envia e a API
 // recebe. É o contrato entre os dois binários: toda mudança incompatível
 // exige um novo SchemaVersion.

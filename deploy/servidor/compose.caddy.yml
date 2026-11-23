@@ -4,7 +4,7 @@
 # pela rede interna; nada dele é publicado. Roteiro: docs/instalar/vps.md.
 #
 #   cp .env.example .env    # e preencha (COMPOSE_FILE=compose.caddy.yml e INVENIRE_DOMAIN)
-#   docker compose up -d --build --wait
+#   docker compose up -d --wait   # --build para montar a imagem daqui
 #   docker compose logs server | grep "primeira configuração"
 name: invenire-servidor
 
@@ -25,9 +25,9 @@ services:
       retries: 30
 
   server:
-    # Ainda não há imagem publicada: --build monta a imagem a partir deste
-    # repositório. Com uma imagem pronta, aponte INVENIRE_IMAGE para ela.
-    image: ${INVENIRE_IMAGE:-invenire-server:dev}
+    # Imagem publicada a cada versão (amd64 e arm64). "docker compose up
+    # --build" monta a imagem a partir deste repositório, com o mesmo nome.
+    image: ${INVENIRE_IMAGE:-ghcr.io/invenire-hq/invenire-server}:${INVENIRE_VERSION:-latest}
     build:
       context: ../..
       args:

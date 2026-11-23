@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package web é o painel do invenire-server: HTML renderizado no servidor
 // com html/template, embutido no binário, sob / na mesma porta da API (que
 // continua em /v1).
@@ -27,9 +29,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/athosbes/invenire/internal/server/api"
-	"github.com/athosbes/invenire/internal/server/download"
-	"github.com/athosbes/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/server/api"
+	"github.com/invenire-hq/invenire/internal/server/download"
+	"github.com/invenire-hq/invenire/internal/server/store"
 )
 
 //go:embed templates/*.html

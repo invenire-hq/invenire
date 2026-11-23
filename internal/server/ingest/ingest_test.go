@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package ingest_test
 
 import (
@@ -13,11 +15,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/athosbes/invenire/internal/server/ingest"
-	"github.com/athosbes/invenire/internal/server/normalize"
-	"github.com/athosbes/invenire/internal/server/store"
-	"github.com/athosbes/invenire/internal/testdb"
-	"github.com/athosbes/invenire/pkg/snapshot"
+	"github.com/invenire-hq/invenire/internal/server/ingest"
+	"github.com/invenire-hq/invenire/internal/server/normalize"
+	"github.com/invenire-hq/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/testdb"
+	"github.com/invenire-hq/invenire/pkg/snapshot"
 )
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package store_test
 
 import (
@@ -13,8 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/athosbes/invenire/internal/server/store"
-	"github.com/athosbes/invenire/internal/testdb"
+	"github.com/invenire-hq/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/testdb"
 )
 
 func setup(t *testing.T) (*store.Queries, *pgxpool.Pool) {
@@ -180,7 +182,7 @@ func TestProposalFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	human, err := q.CreateActor(ctx, store.CreateActorParams{TenantID: tenant.ID, Kind: "human", Name: "athos", Scopes: []string{"admin"}})
+	human, err := q.CreateActor(ctx, store.CreateActorParams{TenantID: tenant.ID, Kind: "human", Name: "ana", Scopes: []string{"admin"}})
 	if err != nil {
 		t.Fatal(err)
 	}

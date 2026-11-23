@@ -26,12 +26,9 @@ Nos exemplos, o servidor é `192.168.0.10` e tem o nome `invenire.local`. Troque
 Na máquina do servidor:
 
 ```sh
-sudo git clone <endereço do repositório> /opt/invenire
+sudo git clone https://github.com/invenire-hq/invenire.git /opt/invenire
 cd /opt/invenire/deploy/servidor
 ```
-
-> O endereço público do repositório ainda vai ser definido. Enquanto isso, copie a pasta do
-> repositório para `/opt/invenire` como preferir.
 
 ## 2. Configurar
 
@@ -58,11 +55,13 @@ Guarde a senha do banco junto com os backups: o `.env` não vai para o git.
 ## 3. Subir
 
 ```sh
-sudo docker compose up -d --build --wait
+sudo docker compose up -d --wait
 ```
 
-A primeira vez monta a imagem (alguns minutos: compila o servidor e o agente para Windows e
-Linux). O PostgreSQL e o servidor voltam sozinhos quando a máquina reinicia.
+A primeira vez baixa as imagens, entre elas a do servidor
+(`ghcr.io/invenire-hq/invenire-server`, que já traz o agente para Windows e Linux). Para
+montar a imagem a partir do código, use `--build` (alguns minutos). O PostgreSQL e o servidor
+voltam sozinhos quando a máquina reinicia.
 
 **Conferir.** Os dois serviços aparecem `healthy`:
 

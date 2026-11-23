@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package transport_test
 
 import (
@@ -12,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/athosbes/invenire/internal/agent/transport"
-	"github.com/athosbes/invenire/internal/server/pki"
-	"github.com/athosbes/invenire/internal/wire"
+	"github.com/invenire-hq/invenire/internal/agent/transport"
+	"github.com/invenire-hq/invenire/internal/server/pki"
+	"github.com/invenire-hq/invenire/internal/wire"
 )
 
 // Servidor com certificado só para invenire.local, chamado por 127.0.0.1:

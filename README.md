@@ -18,11 +18,11 @@ o histórico, identifica os produtos e mostra tudo num painel web e numa API.
 Numa máquina Linux com Docker e o plugin compose, que as outras máquinas alcancem na porta 8443:
 
 ```sh
-sudo git clone <endereço do repositório> /opt/invenire
+sudo git clone https://github.com/invenire-hq/invenire.git /opt/invenire
 cd /opt/invenire/deploy/servidor
 sudo cp .env.example .env
 sudo nano .env      # INVENIRE_PG_PASSWORD (openssl rand -hex 24) e INVENIRE_HOSTS (o IP desta máquina)
-sudo docker compose up -d --build --wait
+sudo docker compose up -d --wait
 sudo docker compose logs server | grep "primeira configuração"
 ```
 
@@ -33,8 +33,6 @@ o `Instalar.cmd` (Windows) ou `sudo ./invenire-agente/instalar.sh` (Linux). Em a
 ela aparece `em-dia` na **Visão geral**.
 
 O passo a passo completo, com como conferir cada etapa: [docs/instalar/rede-local.md](docs/instalar/rede-local.md).
-
-> O endereço público do repositório ainda vai ser definido.
 
 ## Documentação
 
@@ -47,7 +45,20 @@ O passo a passo completo, com como conferir cada etapa: [docs/instalar/rede-loca
 - [Desenvolvimento](docs/desenvolvimento.md): build, testes, sqlc
 - [Índice de toda a documentação](docs/README.md)
 
-A arquitetura e o modelo de dados estão no documento
-[Invenire — Arquitetura e Modelo de Dados](https://claude.ai/artifact/WfzRB6TWaCNPQxdpx9QJtc).
 O `pkg/sysinfo` (leitura de host, SO e software) não depende do formato do snapshot, para poder
 ser compartilhado com o [PeritiaGo](https://github.com/athosbes/PeritiaGo).
+
+## Contribuir
+
+Relatos de problema, ideias e código são bem-vindos: veja [CONTRIBUTING.md](CONTRIBUTING.md)
+(ambiente, testes, padrão de commit e o [termo de contribuição](CLA.md)). Falha de segurança se
+relata em particular, como diz o [SECURITY.md](SECURITY.md). As mudanças de cada versão estão no
+[CHANGELOG.md](CHANGELOG.md).
+
+## Licença
+
+O Invenire é software livre, sob a [GNU Affero General Public License, versão 3](LICENSE)
+(`AGPL-3.0-only`). Você pode usar, estudar, modificar e redistribuir; quem distribui o Invenire,
+ou o oferece modificado como serviço pela rede, precisa oferecer o código-fonte correspondente
+sob a mesma licença. Para usar em outros termos (licença comercial), procure o mantenedor pelo
+GitHub.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package download
 
 import (
@@ -14,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/athosbes/invenire/deploy/agente"
+	"github.com/invenire-hq/invenire/deploy/agente"
 )
 
 // Config é o que vai no instalar.conf do pacote.

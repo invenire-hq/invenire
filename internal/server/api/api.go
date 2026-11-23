@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package api tem os handlers HTTP do invenire-server.
 //
 // A API roda sobre TLS, direto ou num proxy reverso que termina o TLS
@@ -19,10 +21,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
-	"github.com/athosbes/invenire/internal/server/normalize"
-	"github.com/athosbes/invenire/internal/server/pki"
-	"github.com/athosbes/invenire/internal/server/store"
-	"github.com/athosbes/invenire/internal/wire"
+	"github.com/invenire-hq/invenire/internal/server/normalize"
+	"github.com/invenire-hq/invenire/internal/server/pki"
+	"github.com/invenire-hq/invenire/internal/server/store"
+	"github.com/invenire-hq/invenire/internal/wire"
 )
 
 // Server guarda as dependências dos handlers.

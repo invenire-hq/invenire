@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package runner_test
 
 import (
@@ -5,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/athosbes/invenire/internal/agent/runner"
-	"github.com/athosbes/invenire/internal/agent/state"
+	"github.com/invenire-hq/invenire/internal/agent/runner"
+	"github.com/invenire-hq/invenire/internal/agent/state"
 )
 
 // O agente renova o crachá quando ele está perto de vencer, mantém a chave e

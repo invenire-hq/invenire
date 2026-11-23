@@ -26,3 +26,10 @@ exemplo), com os mesmos nomes de arquivo.
 - [Exportação da organização](exportacao.md): formato do pacote e importação futura
 - [Desenvolvimento](desenvolvimento.md): estrutura, build, testes, sqlc
 - [Plano: instalação simples e documentação](plano-instalacao-simples.md) (histórico)
+
+## Projeto
+
+- [Como contribuir](../CONTRIBUTING.md) e o [termo de contribuição](../CLA.md)
+- [Como relatar falha de segurança](../SECURITY.md)
+- [Mudanças de cada versão](../CHANGELOG.md)
+- [Licença (AGPL-3.0)](../LICENSE)

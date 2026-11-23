@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package main
 
 import (
@@ -16,7 +18,7 @@ import (
 	"golang.org/x/sys/windows/svc/eventlog"
 	"golang.org/x/sys/windows/svc/mgr"
 
-	"github.com/athosbes/invenire/internal/agent/runner"
+	"github.com/invenire-hq/invenire/internal/agent/runner"
 )
 
 // defaultBin fica em Arquivos de Programas, que só administradores alteram:

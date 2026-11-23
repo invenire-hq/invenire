@@ -1,0 +1,116 @@
+# Publicação de uma versão, a cada tag v* (ex.: v0.1.0; v0.2.0-rc.1 sai como
+# pré-lançamento e não move a etiqueta latest da imagem):
+#
+#   1. roda o ci.yml inteiro;
+#   2. monta os executáveis com scripts/build.sh e os anexa à release do
+#      GitHub, com o SHA256SUMS e as notas da versão tiradas do CHANGELOG.md;
+#   3. publica ghcr.io/invenire-hq/invenire-server para linux/amd64 e
+#      linux/arm64, com as etiquetas X.Y.Z, X.Y e latest.
+#
+# Cada job recebe só a permissão de que precisa.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  binarios:
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write # criar a release e anexar os arquivos
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: false # cache de build não entra no que é publicado
+
+      - name: montar
+        run: scripts/build.sh "${TAG#v}"
+
+      - name: notas da versão (CHANGELOG.md)
+        run: |
+          versao="${TAG#v}"
+          # Da linha "## [X.Y.Z]" até a próxima seção ou os links do fim.
+          awk -v v="$versao" '
+            index($0, "## [" v "]") == 1          { dentro = 1; next }
+            dentro && (/^## / || /^\[[^]]+\]: /) { exit }
+            dentro                                { print }
+          ' CHANGELOG.md > notas.md
+          if [ ! -s notas.md ]; then
+            echo "CHANGELOG.md não tem a seção ## [$versao]" >&2
+            exit 1
+          fi
+
+      - name: criar a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          versao="${TAG#v}"
+          pre=""
+          case "$versao" in *-*) pre="--prerelease" ;; esac
+          gh release create "$TAG" --verify-tag $pre \
+            --title "Invenire $versao" --notes-file notas.md \
+            dist/"$versao"/*
+
+  imagem:
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # publicar no GHCR
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Sem QEMU: o Dockerfile compila na arquitetura do runner e gera o
+      # binário de cada plataforma por compilação cruzada.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/invenire-server
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+          # latest só para versões finais (sem -rc, -beta…).
+          flavor: |
+            latest=auto
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          push: true

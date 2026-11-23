@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package download_test
 
 import (
@@ -17,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/athosbes/invenire/internal/server/download"
+	"github.com/invenire-hq/invenire/internal/server/download"
 )
 
 // fakeAgents monta uma pasta como a do scripts/build.sh, com executáveis de

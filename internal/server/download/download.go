@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package download distribui o agente pelo próprio servidor: os executáveis
 // de uma pasta (na imagem Docker, compilados junto com o servidor), o
 // SHA256SUMS deles, os scripts de instalação com o endereço já preenchido e o

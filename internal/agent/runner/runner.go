@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package runner junta coleta, fila e envio: é o que os comandos enroll e
 // run do invenire-agent executam.
 package runner
@@ -19,12 +21,12 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/athosbes/invenire/internal/agent/collect"
-	"github.com/athosbes/invenire/internal/agent/queue"
-	"github.com/athosbes/invenire/internal/agent/state"
-	"github.com/athosbes/invenire/internal/agent/transport"
-	"github.com/athosbes/invenire/internal/wire"
-	"github.com/athosbes/invenire/pkg/snapshot"
+	"github.com/invenire-hq/invenire/internal/agent/collect"
+	"github.com/invenire-hq/invenire/internal/agent/queue"
+	"github.com/invenire-hq/invenire/internal/agent/state"
+	"github.com/invenire-hq/invenire/internal/agent/transport"
+	"github.com/invenire-hq/invenire/internal/wire"
+	"github.com/invenire-hq/invenire/pkg/snapshot"
 )
 
 // ErrRevoked indica que o servidor não reconhece mais o certificado do agente.

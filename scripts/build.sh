@@ -27,6 +27,7 @@ build windows amd64 invenire-agent
 build linux amd64 invenire-agent
 build linux arm64 invenire-agent
 build linux amd64 invenire-server
+build linux arm64 invenire-server
 build windows amd64 invenire-server
 
 # Os scripts procuram o agente com estes nomes ao lado deles.
