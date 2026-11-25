@@ -1,6 +1,6 @@
 # Plano: instalação simples, painel web e documentação para código aberto
 
-Plano para outra sessão implementar. Escrito em 2026-11-12, sobre o commit `c7ca30d`
+Plano para outra sessão implementar. Escrito em 2026-11-12, sobre o commit `53ec610`
 (pacote do piloto pronto). As cinco fases foram implementadas; o estado de cada uma, com o que
 ainda não foi testado de verdade, está em [Estado das fases](#estado-das-fases).
 
@@ -281,10 +281,10 @@ ser feitos junto com a Fase 1. Um commit (ou PR) por fase, com os testes da fase
 
 | Fase | Estado | Ainda não testado de verdade |
 |---|---|---|
-| 1 — Servidor atrás de proxy | Feita (`448c4a0`) | — |
-| 2 — Painel web | Feita (`a32e08a`) | painel num navegador de verdade (testado por HTTP) |
-| 3 — Instalador pré-configurado | Feita (`4a6742c`, `bc4c2d8`) | Windows: segunda execução elevada do `Instalar.cmd`, comando de uma linha no PowerShell, SmartScreen |
-| 4 — Implantação e documentação | Feita (`b7dbe10`) | certbot e Let's Encrypt reais; linhas da matriz de proxies além de Nginx e Caddy |
+| 1 — Servidor atrás de proxy | Feita (`05d2858`) | — |
+| 2 — Painel web | Feita (`b22e676`) | painel num navegador de verdade (testado por HTTP) |
+| 3 — Instalador pré-configurado | Feita (`f906939`, `c75c620`) | Windows: segunda execução elevada do `Instalar.cmd`, comando de uma linha no PowerShell, SmartScreen |
+| 4 — Implantação e documentação | Feita (`d7f34d3`) | certbot e Let's Encrypt reais; linhas da matriz de proxies além de Nginx e Caddy |
 | 5 — Abrir o código | Feita na pasta de trabalho | workflows no GitHub de verdade (só validados localmente), publicação no GHCR, release |
 
 ## Futuro (registrado, fora deste plano)
