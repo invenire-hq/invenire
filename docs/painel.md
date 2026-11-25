@@ -1,3 +1,5 @@
+Português | [English](en/dashboard.md)
+
 # Painel web
 
 O `invenire-server` serve um painel no navegador, na mesma porta da API: a API fica em `/v1`, o

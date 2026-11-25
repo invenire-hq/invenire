@@ -1,3 +1,5 @@
+Português | [English](en/agents.md)
+
 # Agentes
 
 O agente (`invenire-agent`) roda como serviço em cada máquina inventariada: coleta hardware,

@@ -1,3 +1,5 @@
+Português | [English](../en/install/choosing.md)
+
 # Qual cenário é o seu
 
 O servidor do Invenire (`invenire-server` com PostgreSQL, em Docker) sobe de três jeitos. Todos

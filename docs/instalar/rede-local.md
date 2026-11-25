@@ -1,3 +1,5 @@
+Português | [English](../en/install/local-network.md)
+
 # Instalar na rede local
 
 Para quando as máquinas inventariadas e o servidor estão na mesma rede (ou numa VPN) e não há

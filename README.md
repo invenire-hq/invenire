@@ -1,3 +1,5 @@
+Português | [English](README.en.md)
+
 # <img src="docs/marca/logo.svg" alt="" width="40" height="40" align="top"> Invenire
 
 <img src="docs/marca/mascote.svg" alt="Coruja do Invenire, com uma lupa no olho" width="120" align="right">

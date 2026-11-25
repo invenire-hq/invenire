@@ -1,3 +1,5 @@
+Português | [English](SECURITY.en.md)
+
 # Segurança
 
 ## Como relatar uma falha

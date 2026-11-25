@@ -1,3 +1,5 @@
+Português | [English](en/security.md)
+
 # Segurança
 
 Quem confia em quem, o que cada peça enxerga e as escolhas de projeto por trás disso. Para

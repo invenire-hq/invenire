@@ -1,3 +1,5 @@
+Português | [English](en/operations.md)
+
 # Operação do servidor
 
 O dia a dia de quem cuida do servidor instalado por um dos [roteiros](instalar/escolha.md):

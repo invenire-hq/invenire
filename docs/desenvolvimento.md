@@ -1,3 +1,5 @@
+Português | [English](en/development.md)
+
 # Desenvolvimento
 
 Go (a versão de `go.mod`), Docker (para o PostgreSQL e o sqlc) e Git. Os comandos são do shell

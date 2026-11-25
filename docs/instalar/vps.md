@@ -1,3 +1,5 @@
+Português | [English](../en/install/vps.md)
+
 # Instalar numa VPS
 
 Para quando o servidor fica na internet, numa VPS (ou qualquer máquina com IP público), e as

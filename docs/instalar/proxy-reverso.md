@@ -1,3 +1,5 @@
+Português | [English](../en/install/reverse-proxy.md)
+
 # Instalar atrás de um proxy reverso
 
 Para quando já existe (ou vai existir) um proxy reverso na frente, com um domínio e um

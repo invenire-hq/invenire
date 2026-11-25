@@ -1,3 +1,5 @@
+Português | [English](en/internals.md)
+
 # Como o Invenire funciona por dentro
 
 São três programas: o **PostgreSQL**; o **servidor** (`invenire-server`), que recebe, organiza e

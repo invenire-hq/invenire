@@ -1,3 +1,5 @@
+Português | [English](en/troubleshooting.md)
+
 # Quando dá errado
 
 Procure a mensagem (ou o sintoma) na tabela da sua etapa. Se não estiver aqui, abra um issue com

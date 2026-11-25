@@ -1,3 +1,5 @@
+Português | [English](en/api.md)
+
 # API
 
 A API fica em `/v1`, na mesma porta do painel. Há três tipos de autenticação:

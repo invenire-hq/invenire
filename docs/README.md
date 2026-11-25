@@ -1,7 +1,11 @@
+Português | [English](en/README.md)
+
 # Documentação do Invenire
 
-Em português (pt-BR). Outros idiomas, quando houver, ficam em pastas próprias (`docs/en/`, por
-exemplo), com os mesmos nomes de arquivo.
+Em português (pt-BR). A versão em inglês fica em [`docs/en/`](en/README.md), com nomes de
+arquivo em inglês (`instalar/rede-local.md` → `en/install/local-network.md`, e assim por diante);
+cada página tem no topo o link para a outra língua. O roteiro do piloto e o plano de instalação
+simples existem só em português.
 
 ## Instalar o servidor
 

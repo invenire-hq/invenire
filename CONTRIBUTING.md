@@ -1,3 +1,5 @@
+Português | [English](CONTRIBUTING.en.md)
+
 # Como contribuir
 
 Obrigado pelo interesse no Invenire. Relatos de problema, ideias, documentação e código são
@@ -10,6 +12,7 @@ bem-vindos. Este guia diz como montar o ambiente, testar e mandar uma mudança.
   trabalho que depois não entra.
 - **Falha de segurança:** não abra issue público. Veja [SECURITY.md](SECURITY.md).
 - **Idioma:** documentação, mensagens do programa, issues e commits são em português (pt-BR).
+  A documentação tem também uma versão em inglês, em [`docs/en/`](docs/en/README.md).
 
 ## Ambiente
 
@@ -48,7 +51,8 @@ E, conforme o que mudou:
 - **Painel:** textos novos no catálogo (`internal/server/web/messages.go`); texto vindo das
   máquinas nunca vira `template.HTML`.
 - **Comportamento visível** (comando, opção, rota, tela, instalação): atualize a documentação em
-  `docs/` e acrescente uma linha em "Não lançado" no [CHANGELOG.md](CHANGELOG.md).
+  `docs/` (e a versão em inglês, em `docs/en/`, ou diga no pull request que ela ainda falta) e
+  acrescente uma linha em "Não lançado" no [CHANGELOG.md](CHANGELOG.md).
 - **Arquivo `.go` novo:** comece com `// SPDX-License-Identifier: AGPL-3.0-only`, como os outros.
 
 ## Commits

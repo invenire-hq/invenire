@@ -1,3 +1,5 @@
+Português | [English](en/export.md)
+
 # Formato de exportação do tenant (versão 1)
 
 O pacote de exportação leva um tenant inteiro de um servidor Invenire para outro: da nuvem para
