@@ -1,4 +1,6 @@
-# Invenire
+# <img src="docs/marca/logo.svg" alt="" width="40" height="40" align="top"> Invenire
+
+<img src="docs/marca/mascote.svg" alt="Coruja do Invenire, com uma lupa no olho" width="120" align="right">
 
 Inventário de máquinas: o que existe, onde está e de que é feito. Um agente leve em cada máquina
 (Windows e Linux) coleta hardware, sistema e software instalado e envia a um servidor, que guarda
